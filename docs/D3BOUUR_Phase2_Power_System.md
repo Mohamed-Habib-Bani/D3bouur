@@ -1,155 +1,125 @@
-# D3BOUUR — Phase 2: Power System Build & Validation (Full Detailed Version)
+# D3BOUUR — Phase 2: Power System Build & Validation (v3 — Four-Branch Design)
 
 ## Before you start — safety rules (read every time)
-1. Never connect anything to the battery's balance connector (small white plug with many thin wires). Only ever use the main discharge connector (thick red + black wires, usually with a bigger connector like XT60).
-2. Match polarity every single time: positive (red, usually marked `+`) to positive, negative (black, usually marked `-` or `GND`) to negative. Reversing this can destroy components instantly, with no warning first.
-3. Multimeter set to **DC Voltage (V⎓)**, not AC (the symbol with a wavy line). Range covering at least 20V.
-4. Work on **one connection at a time** and test with the multimeter before adding the next piece — don't wire the whole chain and test only at the end.
+1. Never connect anything to the battery's balance connector (small white plug with many thin wires). Only ever use the main discharge connector (thick red + black wires).
+2. Match polarity every single time: positive to positive, negative to negative. Reversing this can destroy components instantly.
+3. Multimeter set to **DC Voltage (V⎓)**, not AC. Range covering at least 20V.
+4. Work on **one connection at a time** and test with the multimeter before adding the next piece.
 5. If anything feels warm, smells odd, smokes, or looks wrong at any point: disconnect the battery immediately.
-6. Keep the multimeter's probes only touching the two points you intend to measure — never let probes bridge two different pins by accident.
+6. A switch controls ONLY the positive line. Negative/ground never passes through a switch — it runs as one continuous wire to the common ground point. (This was the cause of an earlier incident — a switch shorted when negative was mistakenly wired through it.)
 
 ---
 
 ## Part A — Inventory check
-Confirm you have all of these physically in hand before starting:
-- [ ] LiPo battery (3S, 11.1V, 5200mAh)
-- [ ] XL4015 buck converter module (SKU:009291) — already calibrated to 5.0V output
-- [ ] SPDT toggle/rocker switch (charge/run switch)
-- [ ] Physical emergency-stop push button
-- [x] Inline fuse holder + fuse — **confirmed: F1AL250V (1A, fast-acting, 250V rating)**. This is sized for the electronics branch only (Pi/screen/sensors via the buck converter) — a separate, higher-rated fuse (~3-5A, to be calculated) is still needed for the motor branch before Step 5 can be powered.
-- [ ] USB-C cable (confirmed genuine USB-C on both ends)
-- [ ] microSD card + card reader
-- [ ] Multimeter
-- [ ] Jumper wires, connectors, soldering gear, wire strippers
-- [ ] Raspberry Pi 5 + fan
-- [ ] Arduino UNO + HW-130 shield
+
+**Have, confirmed working:**
+- [x] LiPo battery (3S, 11.1V, 5200mAh)
+- [x] XL4015 buck converter module (SKU:009291) — repurposed: now powers head servo + ultrasonic sensors, NOT the Pi
+- [x] New power switch — tested clean continuity, confirmed working
+- [x] Inline fuse holder + fuse — F1AL250V (1A) — covers the servo/sensor branch only
+- [x] Raspberry Pi 5 + fan
+- [x] Arduino UNO + HW-130 shield
+- [x] Multimeter
+- [x] Jumper wires, connectors, soldering gear, wire strippers
+- [x] microSD card (already has a working OS on it — see Part B note)
+
+**Still needed:**
+- [ ] **Waveshare UPS Module 3S** — dedicated PD-negotiated 5V/5A power for Pi 5 + screen (solves the red-LED/undervoltage problem)
+- [ ] **Arduino barrel jack power cable** — feeds Arduino directly from the LiPo
+- [ ] USB-C cable (UPS module → Pi)
+- [ ] microSD card reader (for a future clean reflash — not urgent, current Debian+Docker setup works)
+
+**Motor branch fuse — confirmed unobtainable, running unfused:**
+- [x] **Decision**: the motor branch will run with NO fuse at all (real fuse unobtainable, DIY wire fuse also declined). The 1A fuse stays exclusively on the servo/sensor branch, where it belongs — a shared fuse covering both branches isn't viable, since the 4 motors alone draw more than 1A during normal operation and would blow a shared fuse immediately even with no fault present. Running the motor branch unfused means the precautions in Step 4 below are not optional — they are the only protection this branch has.
+
+**No longer needed / dropped:**
+- ~~Emergency stop button~~ — skipped for now per decision; main switch/battery disconnect is the current safety fallback. Can be added later without redoing other wiring.
 
 ---
 
-## Part B — Prepare the SD card (do this before anything else)
-This gets the Pi ready to be controlled over SSH the moment it's powered, with no monitor/keyboard needed.
-
-1. Insert the microSD card into a card reader, plug into a PC.
-2. Open **Raspberry Pi Imager**.
-3. Choose Device: **Raspberry Pi 5**. Choose OS: **Raspberry Pi OS (64-bit)**. Choose Storage: your SD card.
-4. Before writing, open the **advanced options (gear icon)**:
-   - Enable SSH — use password authentication
-   - Set a username and password you'll remember
-   - Enter the WiFi network name and password you'll be using at the lab
-   - Set hostname to something like `d3bouur`
-5. Write the image. Wait for it to finish and verify.
-6. Eject safely, keep the card ready to insert into the Pi later in this process.
+## Part B — Pi software status (already done)
+The Pi's SD card already has a working setup — no need to reflash unless you want to:
+- OS: Debian 13 (trixie), confirmed genuine Raspberry Pi 5 Model B Rev 1.0, 8GB RAM
+- Hostname: `d3bouur`
+- User: `d3bouur`, sudo access confirmed
+- Docker installed and verified
+- ROS 2 Jazzy verified working via `ros:jazzy-ros-base` Docker container
+- EEPROM config: `PSU_MAX_CURRENT=5000` already set (from troubleshooting the XL4015 power issue)
+- Still to add: `usb_max_current_enable=1` in `/boot/firmware/config.txt` (belt-and-suspenders alongside the UPS module)
 
 ---
 
-## Part C — Build the power chain, step by step
+## Part C — The four power branches
 
-### Step 1: Battery → Switch (fuse moved to Step 3, see note)
-**Important change from the original plan**: the fuse we have (F1AL250V, 1A) is only rated for 1 amp — too low for the combined system (motors alone can pull several amps). Instead of placing it before the switch (protecting everything), it's placed later, specifically on the **buck converter's input line only** (Step 3), protecting just the Pi/screen/sensors branch. The motor branch (Step 6) remains unfused until a properly-rated fuse (~3-5A) is sourced, and stays unpowered until then.
+```
+LiPo Battery (11.1V) → Fuse → Switch
+      │
+      ├─ Branch 1: HW-130 EXT_PWR → 4 Motors          (needs its own 3-5A fuse)
+      ├─ Branch 2: Waveshare UPS Module 3S → 5V/5A PD  → Pi 5 (USB-C) + Screen (micro-USB)
+      ├─ Branch 3: XL4015 (1A fuse, already wired)     → Head servo + 6 ultrasonic sensors
+      └─ Branch 4: Arduino UNO's own barrel jack        (self-regulating, 7-12V input, independent)
 
-**What connects to what:**
-- Battery's main discharge connector **positive (red)** wire → switch's input terminal directly (no fuse yet at this point)
-- Battery's negative (black) wire → switch's other terminal / ground path
+USB mic + speaker → powered through Pi's own USB ports (no separate wiring needed)
+PTZ camera → power source TBD, pending delivery
+```
 
-**Do this:**
-1. Connect the battery's red wire directly to the switch's input terminal (solder or a secure connector — never just twisted wires left loose).
-2. Connect the battery's black wire to the switch's ground path (or straight through, depending on your switch type).
-3. Flip the switch to the "run"/"on" position.
-
-**Check with multimeter:**
-- Red probe on switch output terminal, black probe on battery negative.
-- Expected: **~11-12.6V** (confirms the switch is passing power through correctly).
+**Why split this way**: isolates high-current/noisy loads (motors) from PD-sensitive loads (Pi+screen) from moderate simple loads (servo+sensors) from self-regulating loads (Arduino) — a problem in one branch can't disturb the others.
 
 ---
 
-### Step 2: Switch output → Fuse (F1AL250V, 1A) → Buck converter (XL4015)
-**What connects to what:**
-- Switch output (positive, ~11V) → one side of the **fuse holder** (with the 1A fuse inserted)
-- Fuse holder's other side → buck converter's **IN+** terminal
-- Battery negative (from switch, or straight through) → buck converter's **IN-** terminal directly (no fuse on the negative line)
+## Part D — Build sequence
 
-**Do this:**
-1. Connect switch output positive → fuse holder input.
-2. Connect fuse holder output → buck converter **IN+**.
-3. Connect negative line → buck converter **IN-**.
+### Step 1: Battery → Switch (positive only) — ALREADY DONE, VERIFIED
+Battery positive → switch terminal 1. Switch terminal 2 → output, tested ON=~11-12.6V, OFF=0V. Battery negative goes straight to a common ground point, never through the switch.
 
-**Check with multimeter:**
-- Red probe on the fuse holder's output side, black probe on negative line. Expected: **~11-12.6V** (confirms the fuse is intact and passing power).
-- Red probe on buck converter's **OUT+**, black probe on **OUT-**.
-- Expected: **5.0V exactly** (we calibrated this before — this step confirms it's still correct after being moved/rewired).
-- If it's drifted: small careful adjustments to the CV trimmer on the board, rechecking after each small turn, until it reads 5.0V again.
+### Step 2: Switch output → Fuse (1A) → XL4015 — ALREADY DONE, VERIFIED
+Switch output → fuse → XL4015 IN+. Common ground → XL4015 IN-. Confirmed OUT+/OUT- = 5.0V.
 
----
+**Important — XL4015's new job**: this branch now feeds the **head servo and 6 ultrasonic sensors**, not the Pi. Do NOT reconnect the Pi to this branch — it lacks the USB-C PD negotiation the Pi 5 requires (confirmed via testing: Pi's LED stayed red on this branch even at max current trimmer).
 
-### Step 3: Buck converter output → Raspberry Pi 5 (first real-load test)
-**What connects to what:**
-- Buck converter **OUT+/OUT-** → USB-C cable → Raspberry Pi 5's USB-C power port
+### Step 3: Pi 5 Power — BLOCKED, no working solution currently available
+**Status: genuine unresolved hardware gap.** Every locally-available option has been tried and ruled out:
+- XL4015 buck converter — confirmed unstable under load (enters charging-mode behavior, LED changes color, current climbs erratically rather than holding steady); firmware overrides (`PSU_MAX_CURRENT=5000`, `usb_max_current_enable=1`) both set and confirmed not sufficient to fix it
+- Waveshare UPS Modules (1S, 2S, 4S variants on hand) — all are cell-count-specific battery management boards designed for direct-wired individual 18650 cells, not compatible with the assembled 3S LiPo pack; none match the pack's 3S/11.1V configuration
+- L298N — misidentified attempt, this is a motor driver, not a voltage regulator, cannot do this job
+- No generic buck converter (e.g. LM2596-style) available locally
+- No online ordering possible
 
-**Do this:**
-1. Insert the pre-configured SD card into the Pi (from Part B).
-2. Connect the USB-C cable from the buck converter output to the Pi.
-3. Power on (flip the switch on if not already).
-4. Watch the Pi's onboard status LEDs — a small green LED should flash during boot (SD card activity), settling after ~30-60 seconds.
-5. From your laptop, connected to the same WiFi network you configured, open a terminal and run:
-   ```
-   ssh yourusername@d3bouur.local
-   ```
-   (replace `yourusername` with what you set in the Imager)
-6. Enter the password you set. You should land in a Pi terminal prompt.
-7. Run:
-   ```
-   vcgencmd get_throttled
-   ```
-   Expected result: `throttled=0x0` (means no undervoltage ever detected — power supply is solid).
-8. If it shows anything else: the buck converter's current limit (CC trimmer) is likely set too low. Adjust it higher, power-cycle the Pi, and retest.
-9. Let the Pi run for several minutes over SSH (run a few commands, `ls`, `top`, etc.) — confirm it doesn't randomly disconnect or restart.
+**Current workaround for continued development**: a borrowed phone charger (with its own intact USB-C cable, providing genuine PD negotiation) is used to power the Pi during all software/development work. This is fully legitimate for development purposes — it does not need to be the final power solution to make progress on ROS 2, Docker, code, etc.
 
----
+**What's actually needed to unblock this for the real robot**: any ONE of —
+1. A genuine 3S-compatible or wide-input Raspberry Pi 5 PD power module (e.g. Geekworm RPi5-5V5A-PD or equivalent) — not locally available, would need ordering
+2. A plain generic buck converter (non-charging-logic type, e.g. LM2596/MP1584-based) rated 5.1V/3A+, combined with the firmware overrides already set — not yet found locally
+3. Any other Waveshare/UPS module genuinely matched to a 3S configuration
 
-### Step 4: Emergency stop button
-**What connects to what:**
-- Wired in-line on the main positive power path, positioned **before** the buck converter and the motor power line both branch off — meaning: Switch output → **through the emergency stop button** → then splits to buck converter and motor power.
+**Action item**: flag this to project supervisor/coworkers — a compatible part may be available through AcaROBOTICS or via an ordering channel not currently accessible to the intern personally. This is a parts-availability blocker, not a technical or skill gap.
 
-**Do this:**
-1. Insert the emergency-stop button in-line on the positive wire, between the switch and the point where it splits toward the fused buck-converter branch (Step 2) and the still-unfused HW-130 EXT_PWR branch (Step 5).
-2. In its normal (not pressed) state, it should allow power through.
-3. When pressed, it should physically break the circuit, cutting power to everything downstream at once.
+### Step 4: Motor power path (HW-130 EXT_PWR) — WIRED, VERIFIED, NO FUSE, NOT YET FULLY POWERED
+Switch output (a third wire, splitting from the same point) → HW-130 EXT_PWR "+M" — **no fuse in this branch**. Common ground → EXT_PWR "GND". Confirmed ~11-12.6V present at this terminal.
 
-**Check with multimeter (or just observe the Pi):**
-1. With everything running normally (Pi powered, SSH connected), press the emergency stop button.
-2. Expected: the Pi loses power immediately, SSH session drops.
-3. Release/reset the button (many are twist-to-release or pull-to-release), confirm power returns and the Pi can be turned back on normally.
+**This branch has NO fuse protection at all. The following precautions are the ONLY safety measure on this branch — treat them as mandatory, not optional:**
+1. Continuity check (battery disconnected, multimeter on continuity mode) across the full motor branch before every single power-on, every time
+2. When testing motors (Phase 4), power one motor briefly first — never all four simultaneously under sustained load on a first test
+3. Stay physically present the entire time motors are powered, hand ready on the switch, ready to disconnect immediately
+4. Watch/feel for heat along motor wiring and at the HW-130 board during any test
+5. Visually inspect all motor branch connections before each session for anything loose, exposed, or different from last time
+
+**Do NOT power the motors yet in Phase 2** — this step is wiring and voltage verification only. Also still needs the "PWR" jumper near EXT_PWR checked/photographed to confirm it's set to external power, not the Arduino's own 5V.
+
+### Step 5: Arduino power — NEW, NOT YET DONE
+Arduino UNO has its own onboard voltage regulator. Feed it directly from the battery (post-fuse, post-switch) via its DC barrel jack input — no additional regulation needed, the Arduino handles this internally. Keep this as an independent connection, not sharing a rail with the motors or the Pi.
 
 ---
 
-### Step 5: Motor power path (HW-130 EXT_PWR) — wiring only, not testing motors yet
-**What connects to what:**
-- Switch output (battery voltage, ~11V, **after** the emergency stop button, but **NOT** through the buck converter) → HW-130's **EXT_PWR "+M"** terminal
-- Battery negative → HW-130's **EXT_PWR "GND"** terminal
-
-**Do this:**
-1. Locate the EXT_PWR terminal on the HW-130 (the small 2-pin screw terminal near where "SBX" is printed on the board).
-2. Locate the small jumper near it (marked "PWR" in the photo we looked at) — **this must be set to use external power, not the Arduino's own 5V.** Take a clear close-up photo of this jumper before touching it, and check its current position against the board's silkscreen labeling (the printed text on the board itself usually indicates which position means what).
-3. Connect switch output (positive) → EXT_PWR "+M".
-4. Connect battery negative → EXT_PWR "GND".
-5. **Do not power on the motors yet.** This step is purely confirming the wiring path is physically correct and ready — actual motor testing happens in Phase 4, once we're also ready to handle a robot that can suddenly move.
-
-**Check with multimeter:**
-- Red probe on EXT_PWR "+M" terminal, black probe on "GND" terminal, with switch ON.
-- Expected: **~11-12.6V** present at this terminal, confirming motor power is correctly available, separate from the Pi's 5V line.
-
----
-
-## Part D — What "done" looks like for Phase 2
-- [ ] SD card prepared with SSH + WiFi pre-configured
-- [ ] Battery → switch chain confirmed at ~11-12.6V
-- [ ] Switch → 1A fuse → buck converter confirmed: fuse output ~11-12.6V, buck converter output steady 5.0V
-- [ ] Pi boots, reachable via SSH, `vcgencmd get_throttled` shows `0x0`
-- [ ] Emergency stop button confirmed to cut power to everything when pressed
-- [ ] Motor power path (EXT_PWR) wired and confirmed at ~11V, jumper position verified — but motors NOT yet powered (still unfused — a 3-5A fuse must be sourced for this branch before Step 5 can be energized)
+## Part E — What "done" looks like for Phase 2
+- [x] Switch tested clean, wired correctly (positive only)
+- [x] Fuse + XL4015 branch verified at 5.0V, now serving servo/sensors
+- [x] Motor branch (EXT_PWR) wired and confirmed at ~11V — jumper position still needs physical verification
+- [ ] **BLOCKED**: Pi 5 dedicated power module — all local options exhausted, needs to be sourced externally (see Step 3 for details); using borrowed phone charger for development in the meantime
+- [ ] Motor branch confirmed unfused by decision — real motor testing (Phase 4) only proceeds with ALL mandatory precautions in place, every single time, given zero automatic protection on this branch
+- [ ] Arduino wired to its own barrel jack power, confirmed running independently
 
 ---
 
 ## Notes / observations (fill in as you go)
 _(space for anything unexpected while working)_
-

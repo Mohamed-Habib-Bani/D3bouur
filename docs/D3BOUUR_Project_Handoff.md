@@ -309,7 +309,25 @@ A complete, detailed step-by-step document exists separately: **`D3BOUUR_Phase2_
 - **Still not done**: actual battery/fuse/switch/buck-converter/Pi wiring steps (Steps 1-4 of the Phase 2 document) have not yet been physically executed — today's work was entirely about auditing and preparing the Pi's software environment, not the physical power chain.
 - **Card reader still not obtained** — a full OS reflash (to Ubuntu Server 24.04 LTS, the originally preferred choice for native ROS 2 support and better performance via no desktop environment) remains a good future improvement once a USB microSD card reader is sourced, but is **no longer urgent/blocking** now that Docker solves the ROS 2 compatibility concern on the current Debian install.
 
-**Decision on OS strategy**: Ubuntu Server 24.04 LTS remains the theoretically ideal choice (native ROS 2 support, no desktop overhead) if a fresh reflash happens later. For now, the Debian 13 + Docker approach is a fully valid, working alternative and does not block progress.
+**Phase 2 update — power incident and redesign (this session):**
+- **Safety incident**: initial switch wiring mistake (negative wire connected through the switch instead of bypassing it) caused a dead short and visible smoke on first power-up. Battery disconnected immediately, no injuries, no damage to battery (inspected, no swelling/heat). The switch itself was damaged (confirmed via inconsistent continuity testing afterward) and was replaced. **Root cause was an imprecise instruction from Claude** — corrected: a switch must only ever sit on the positive line; negative/ground runs straight through to a common ground point, never through the switch.
+- **Architecture redesigned into four separate power branches**, isolating high-current/noisy loads from PD-sensitive loads from moderate loads from self-regulating loads:
+  1. LiPo → HW-130 EXT_PWR → 4 motors (raw ~11V, currently **unfused** — see below)
+  2. LiPo → dedicated Pi 5 power module → Pi 5 + Screen (**currently blocked**, see below)
+  3. LiPo → 1A fuse → XL4015 buck converter → Head servo + 6 ultrasonic sensors (verified working, 5.0V confirmed)
+  4. LiPo → Arduino UNO's own barrel jack (self-regulating, not yet wired)
+- **Emergency stop button**: decision made to skip wiring it in for now. Main switch / battery disconnect is the current fallback for cutting power.
+- **Motor branch fuse**: confirmed genuinely unobtainable (no local source, no online ordering possible). Decision made to run this branch **completely unfused**, relying entirely on manual precautions (continuity check before every power-on, never leaving motors unattended, incremental single-motor testing, visual/thermal inspection each session) rather than a DIY wire-fuse compromise, which was also considered and declined.
+- **Raspberry Pi 5 power — discovered a genuine Pi 5-specific requirement**: the Pi 5 has an onboard PMIC that requires proper USB-C Power Delivery negotiation to fully boot and draw adequate current; without it, USB port power is restricted to 600mA combined and the board can fail to boot properly (LED stays red instead of green). The XL4015 (a battery-charging-style module) cannot perform this negotiation and additionally showed unstable charging-mode behavior under load (LED color changing, current climbing erratically) — confirmed unsuitable for powering the Pi directly, though it remains suitable for the servo/sensor branch.
+- **Extensive troubleshooting of Pi power, all options exhausted with local resources**:
+  - Firmware overrides applied (`PSU_MAX_CURRENT=5000` in EEPROM, `usb_max_current_enable=1` in config.txt) — both confirmed applied, neither resolved the issue (confirms root cause is unstable current delivery, not just negotiation)
+  - Waveshare UPS Modules (1S, 2S, 4S variants already owned) — researched and ruled out: these are cell-count-specific battery management boards designed for direct-wired individual 18650 cells with per-cell balance/protection circuitry, not compatible with an assembled 3S/11.1V pack of a different configuration
+  - L298N module — misidentified attempt, confirmed to be a motor driver, not a voltage regulator
+  - No generic buck converter (e.g. LM2596-style, non-charging-logic) available locally
+  - No online ordering currently possible for the intern
+- **Current status: Pi 5 dedicated power is a genuine, documented blocker.** Development continues using a borrowed phone charger (with intact USB-C cable providing proper PD negotiation) for all Pi-related software work — this is fully legitimate for development purposes and does not block ROS 2/Docker/code progress, only the physical, permanent robot build.
+- **Decision**: continue with the phone charger workaround for development until the parts situation can be discussed with the project supervisor — likely AcaROBOTICS has access to compatible parts or an ordering channel not currently available to the intern personally. This is a parts-availability issue, not a technical/skill gap, and worth raising as such.
+- **Recommended part once sourcing is possible**: a dedicated Raspberry Pi 5 power module with built-in PD support (e.g. Geekworm RPi5-5V5A-PD, ~$15-20, wide 9-24V DC input) — sidesteps both the PD negotiation requirement and the cell-count-matching issues of UPS-style boards.
 
 ---
 
@@ -341,8 +359,8 @@ A complete, detailed step-by-step document exists separately: **`D3BOUUR_Phase2_
 - **Face recognition library** — options open (`face_recognition` vs. lighter MediaPipe-based approach), decision deferred.
 - **Config database contents/tech** — not finalized (likely SQLite).
 - **LLM final choice** — comparison test (Ollama vs. Google Gemini free tier vs. Groq) was planned but not yet executed. Note the cloud options require internet, which conflicts with the Pi-hotspot-only networking design — a hybrid fallback approach was discussed as a possible resolution.
-- **Fuse for motor branch** — still needed (~3-5A rating), the 1A fuse on hand only covers the electronics branch.
-- **USB microSD card reader** — no longer urgent (Docker solved the ROS2/OS mismatch), but still worth getting eventually for a clean Ubuntu Server reflash and to fully remove the old locked user account.
+- **BLOCKED — Pi 5 dedicated power module** — genuine, documented blocker (see Phase 2 section above for full detail). Using borrowed phone charger for development in the meantime. Needs discussion with project supervisor for sourcing options.
+- **Motor branch runs unfused** — confirmed decision given fuse unobtainable; requires strict manual safety precautions every session (see Phase 2 document).
 - **HW-130 EXT_PWR jumper position** — needs physical, in-person verification before wiring motor power (see Section 4).
 - **Interface content readiness** — folders of event photos/videos exist, but haven't been reviewed for what's actually usable in the final interface.
 - **LLM budget conversation with boss** — recommended but not yet confirmed: whether AcaROBOTICS will cover a small API cost (a few dollars total) vs. staying fully local/free.
@@ -356,9 +374,141 @@ A complete, detailed step-by-step document exists separately: **`D3BOUUR_Phase2_
 
 ---
 
-## 12. Recommended Immediate Next Steps
-1. Buy remaining components: fuse+holder, confirm/replace USB-C cable, microSD card reader.
-2. Prepare the SD card using Raspberry Pi Imager (SSH + Wi-Fi pre-configured) — can be done before lab access.
-3. Execute Phase 2 (power system build) using the detailed document, including in-person verification of the HW-130 jumper.
+## 13. Physical Layout & Pin Assignments (Phase 3, in progress)
+
+### Phase 3 status: essentially complete
+All components physically mounted and secured: motors+wheels, servo, all 6 sensors, screen, Arduino+HW-130, battery. Pi and screen are physically in place (mounted together in the head) but still running on temporary external chargers rather than the main battery circuit — same tracked blocker as Phase 2 (Section 7/8), not a new issue. Remaining open items are camera/mic/speaker (reserved mounting spots only, waiting on parts delivery) and eventual full power consolidation once the Pi power module is sourced.
+
+### Chassis design
+- **Material**: wood, custom-built body (already in hand)
+- **Layout**: base box (bottom) containing wheels, battery, and electronics; a neck connecting to a head (top) containing camera, screen, mic, and speaker
+- **Sensor placement**: 4 ultrasonic sensors around the neck (front/back/left/right, roughly head-height — for person detection), 2 more on the base box (left/right — for low obstacle detection), total 6
+- **Head servo**: mounted at the neck/head junction, turns the screen to face detected visitors
+- **Wire routing to the head**: service loop approach (slack in each wire to survive the servo's rotation without snagging), combined with a software-limited rotation range (not full 360°) given the servo's imprecision
+
+### HW-130 shield power configuration — IMPORTANT CHANGE
+- **PWR jumper REMOVED** (was briefly installed, then reverted). Reasoning: with the jumper installed, the Arduino would be powered both via EXT_PWR *and* via its USB connection to the Pi simultaneously — two power sources feeding the same rail, which the shield's own documentation explicitly warns against.
+- **Current setup**: EXT_PWR powers ONLY the motors (isolated). The Arduino gets its power through its USB cable connection to the Pi (which also carries the serial data link) — this is the documented, recommended configuration for this shield type.
+- Signal/control pins (shift register, motor direction) remain unaffected by this change — only the power-sharing connection was removed.
+
+### Motor terminal mapping (HW-130)
+| Terminal | Wheel |
+|---|---|
+| M1 | Left front |
+| M2 | Right front |
+| M3 | Back right |
+| M4 | Left back |
+This mapping must be used consistently in the Arduino motor-control code (Phase 4). Individual motor spin direction (forward/backward) still needs verification once motors are actually powered — if any wheel spins the wrong way, fix by swapping that motor's two wires at the terminal.
+
+### Hardware note: original Arduino UNO replaced
+The original Arduino UNO was found to have a genuine hardware fault — it powers on normally (LED lights, onboard 5V regulator works correctly) but its USB-to-serial connection never enumerates on any computer (tested on both the Pi and a Windows PC, confirmed not detected on either). This is unrelated to any wiring, power, or configuration work done today — isolated component failure. **Replaced with a second, confirmed-working Arduino UNO.** The HW-130 shield (with PWR jumper already removed) and all sensor/servo wiring were moved to the new board.
+
+### Servo connection
+- Plugs directly into the HW-130's onboard "Servo 1" 3-pin header (no loose wiring) — this header is internally wired to Arduino pin 10, 5V, and GND by the shield itself.
+- Only one servo in use (head servo), so pin 9 remains free for other use (see below).
+- Note: servos draw power from the Arduino's own onboard 5V regulator, not EXT_PWR. Given the head servo needs real torque (heavier head), watch for brownout/reset issues once under load — if seen, this is the likely cause.
+
+### Ultrasonic sensor pin assignments (Arduino, via HW-130's pass-through headers)
+Given the shield's shift register already occupies pins 3,4,5,6,7,8,11,12 and pins 0,1 are reserved for Pi serial communication, only 7 digital/analog pins remain — exactly enough using the shared-trigger technique (all 6 sensors' Trigger pins wired together to one pin, since they can fire simultaneously; each sensor keeps its own individual Echo pin).
+
+| Location | Echo pin |
+|---|---|
+| Neck — Front | Pin 2 |
+| Neck — Back | Pin 13 |
+| Neck — Left | Pin A0 |
+| Neck — Right | Pin A1 |
+| Base box — Left | Pin A2 |
+| Base box — Right | Pin A3 |
+
+Shared across all 6 sensors: Trigger → Pin 9, VCC → 5V, GND → GND (use the Arduino/shield's standard power header pins, verified with multimeter before trusting, given the recent PWR jumper change).
+
+**Wiring tip**: label each sensor's wire with its location immediately upon connecting — six similar-looking sensors are easy to mix up, and a wrong mapping means the robot misreads which direction an obstacle/person is actually in.
+
+### Motor direction test results (confirmed via AFMotor_R4 library, individual motor tests)
+| Terminal | Wheel | Physical response to `run(FORWARD)` | Software compensation needed |
+|---|---|---|---|
+| M1 | Left front | Spins backward | **Command `BACKWARD` to move this wheel forward, `FORWARD` to reverse it** |
+| M2 | Right front | Spins forward | None — `FORWARD`/`BACKWARD` work as expected |
+| M3 | Back right | Spins backward | **Command `BACKWARD` to move this wheel forward, `FORWARD` to reverse it** |
+| M4 | Left back | Spins forward | None — `FORWARD`/`BACKWARD` work as expected |
+
+**Decision**: wiring will NOT be physically corrected (would require re-accessing terminals after final assembly) — this is handled entirely in software in the Phase 4 motor control code. Any code driving M1 and M3 must invert the direction command relative to M2 and M4 to achieve consistent, correct robot movement (straight forward, straight backward, accurate turning).
+
+**Library note**: this shield uses the `AFMotor_R4.h` library (a modern drop-in replacement for the classic AFMotor library — despite the "R4" name, it installs and works correctly on standard Arduino Uno too). Motor objects created via `AF_DCMotor motor(1);` through `AF_DCMotor motor(4);`, controlled via `.run(FORWARD/BACKWARD/RELEASE/BRAKE)` and `.setSpeed(0-255)`.
+
+### Servo — root cause found and fixed
+The servo failed to turn at all when powered through the Arduino (whether via USB from Pi or PC) — traced to the **Arduino USB port's built-in ~500mA current limit**, insufficient for this higher-torque servo. **Fix**: servo's power wires (V+, GND) now connect directly to the **XL4015's output** (5.0V, real current capacity) instead of the Arduino — only the signal wire remains connected to Arduino pin 10. A shared ground connection between the Arduino and the XL4015/battery circuit was confirmed necessary and verified via continuity check for the PWM signal to work correctly. Confirmed working after this change.
+
+### Sensor pin corrections (final, confirmed working)
+Neck-Front and Neck-Back were reassigned from pins 2/13 to **A4/A5** after discovering pins 2/13 had an unreliable connection through the HW-130's pass-through header on this specific board (root cause found and fixed by the user directly). Final confirmed-working pin table:
+| Location | Echo pin |
+|---|---|
+| Neck-Front | A4 |
+| Neck-Back | A5 |
+| Neck-Left | A0 |
+| Neck-Right | A1 |
+| Base-Left | A2 |
+| Base-Right | A3 |
+Shared Trigger remains on Pin 9. All 6 sensors confirmed independently working with a corrected test sketch (the original shared-single-trigger-then-loop-through-all-echoes approach had a timing bug — fixed by firing the trigger fresh immediately before reading each individual sensor, rather than once for all six).
+
+### Phase 4 milestone — Pi to Arduino serial bridge confirmed working end-to-end
+After resolving a parsing bug (the Arduino `String` class was unreliable for the multi-value motor command; rewritten using plain `char` buffers and `strtok()`, which fixed it completely) and a Pi-side serial permissions issue (`sudo usermod -aG dialout d3bouur` — Pi user needed to be added to the `dialout` group to access `/dev/ttyACM0`), the full communication chain is verified working:
+- Pi sends `M:150,150,150,150` → Arduino receives it correctly, parses all 4 values, and applies the M1/M3 direction compensation automatically and correctly (confirmed via debug output showing `-150` for M1/M3, `150` for M2/M4, exactly matching the documented wiring quirk)
+- Pi sends `X` → Arduino stops all motors immediately
+- Sensor data (`D:` lines) streams continuously in the background throughout, unaffected by command handling
+- Communication protocol: simple text lines — `M:v1,v2,v3,v4` for motor speeds, `S:angle` for servo, `X` for immediate stop, `D:six,comma,separated,values` for sensor readings sent from Arduino to Pi
+
+**Testing note**: manually typing commands into Arduino IDE's Serial Monitor proved unreliable for triggering the Arduino's command handler (root cause not fully identified, possibly related to how the Monitor sends line terminators) — testing was moved to the real Python script on the Pi instead, which worked correctly and is also how the real system will operate, so this is not a concern going forward.
+
+**Known separate issue, not yet resolved**: sensors consistently show "-1" (no reading) for Back (A5), Left (A0), and BaseLeft (A2) in recent tests, while Front, Right, and BaseRight read correctly. This needs investigation — possibly a connection that shifted during today's extensive reconnecting (Arduino swap between PC/Pi, testing sessions). Worth checking these three connections physically before relying on them for real navigation.
+
+### Combined test — all subsystems verified working together
+A single combined Arduino sketch tested sensors, servo, and all 4 motors together in one loop — confirmed working correctly: all 6 sensors reporting real readings, servo turning both directions, all 4 motors driving forward and backward together (with M1/M3 direction compensation applied correctly). This closes out hardware-level verification for the Arduino/HW-130/sensor/servo/motor subsystem. Ready for Phase 4 (Arduino↔Pi serial bridge, moving control logic from a fixed test loop to real commands from the Pi).
+
+### Pi 5 power module — final decision
+**Primary choice**: Geekworm RPi5-5V5A-PD — purpose-built for Pi 5, wide 9-24V DC input (accepts the 11.1V LiPo directly), genuine negotiated 5V/5A output via USB-C, ~$15-20.
+**Backup if unavailable**: Yahboom PD Power Expansion Board — equally strong, explicitly validated for robotics/battery-pack setups, wide 6-24V input, same 5V/5A output.
+**Ruled out**: HAT-style mounted UPS modules (like Geekworm X1202) — use GPIO pins, often require their own separate 18650 cells rather than the existing LiPo pack, harder to test in isolation. A cable-connected module was chosen instead, consistent with how the rest of the project has been built and verified step by step.
+**Confirmed power budget** (Pi 5 + Arduino via USB + USB mic + USB speaker + mouse/keyboard, NOT including the camera, which will be powered separately): realistic peak ~4-4.2A, comfortably fits under a 5A-rated supply with headroom. Camera is confirmed to be powered from a separate source, not through this same Pi power budget.
+**Wiring**: LiPo → [fuse, electronics branch] → module's DC input → module's 5V/5A output → USB-C → Pi 5.
+**Validation once purchased**: verify ~5.1V output with multimeter, then real-load test (Pi + fan + mouse + keyboard + mic + speaker all connected) checking `vcgencmd get_throttled` shows `throttled=0x0` and the Pi's status LED is green.
+
+### Shopping list (remaining)
+- Geekworm RPi5-5V5A-PD (or Yahboom PD Power Expansion Board as backup) — solves the Pi power blocker
+- USB microphone — any basic USB class-compliant mic
+- USB speaker — any basic USB-powered speaker
+- Stacking headers (optional, only needed if reverting to direct-Arduino-pin wiring for anything in the future — not currently required since the HW-130 pass-through issue for sensors/servo/power was resolved directly)
+
+### Camera identified — V380 Pro, integration status unknown pending testing
+The PTZ camera has arrived and is identified as a **V380 Pro** — a consumer smart-home WiFi camera (not an industrial RS485/Pelco-D camera as originally assumed), with a companion mobile app, built-in microphone and speaker, motorized pan-tilt, IR night-vision LEDs, and its own WiFi hotspot for initial setup.
+
+**Critical unknown, gating everything else**: whether this specific unit's firmware supports RTSP/ONVIF (standard protocols that would let our own code access the video/audio/PTZ directly) or is fully locked to its proprietary app-only protocol. Research shows this genuinely varies by unit/firmware batch — some V380 Pro cameras support RTSP+ONVIF cleanly, others are fully encrypted/locked with no known workaround.
+
+**Test plan (to execute once camera is physically set up)**:
+1. Set up camera normally via the V380 Pro app (connect to WiFi)
+2. Check app → camera settings → Advanced Settings → look for an **ONVIF** toggle
+3. If not present, try the community-known **`ceshi.ini`** SD card method: create a file named exactly `ceshi.ini` on a microSD card, insert into the camera, power cycle — camera should give a voice prompt (often in Chinese) confirming it read the file, then recheck the app for the ONVIF option
+4. If ONVIF enables successfully, test in this order:
+   - Video stream via RTSP (near-certain to work if ONVIF is on)
+   - Audio-in from the camera's built-in mic via the same RTSP stream (likely, if the stream carries an audio track) — **this could let us reuse the camera's mic instead of buying a separate USB mic**
+   - PTZ control via standard ONVIF PTZ commands (likely, if implemented in this firmware) — would give full programmatic head/camera aim control from the Pi
+   - Two-way audio to the camera's speaker via ONVIF "back channel" (uncertain — not all budget firmware supports this even when RTSP/PTZ work) — **this could let us reuse the camera's speaker instead of buying a separate one**
+   - LED control (uncertain, lower priority, not critical to core function)
+
+**Power**: camera has two screw terminals on the back for external DC power (not USB/barrel jack) — exact voltage requirement not yet confirmed, need to check for printed voltage marking near the terminals once in hand.
+
+**Fallback if RTSP/ONVIF cannot be enabled**: camera becomes usable only through its own standalone app, not integrable into the robot's own AI vision/audio pipeline. Would need to fall back to separate, more open components (a standard webcam/Pi camera module for AI vision, and separately-purchased USB mic/speaker) — the shopping list items for USB mic/speaker should NOT be considered optional/skippable until the RTSP/ONVIF test result is known.
+
+### Deferred components (not yet connected, physical space reserved only)
+- Camera — mounting spot reserved on head, exact connector/protocol unknown until delivery
+- Mic + speaker — mounting spot reserved inside head, wiring deferred until parts arrive
+
+---
+
+## 14. Recommended Immediate Next Steps
+1. Finish Phase 3 physical assembly: mount battery, Pi, Arduino+HW-130 inside the base box; wire and mount all 6 ultrasonic sensors per the pin table above; mount the screen in the head with service-loop wiring.
+2. Source a proper Pi 5 power module (see Section 7/Phase 2 for full detail on the blocker) — this is the one real outstanding hardware gap, worth raising with the project supervisor.
+3. Get a basic spare USB charger for the screen (separate from the Pi's borrowed charger) so both can run simultaneously during testing.
 4. Push the `ros2_ws` Git repository to GitHub, and add any collaborators for real shared, versioned access going forward (this handoff document should live there too, e.g. in a `docs/` folder).
 5. When the camera and mic/speaker arrive, identify their exact specs/protocols and update this document accordingly.
+6. Once Phase 3 is complete, move to Phase 4 (Arduino↔Pi serial bridge, basic movement) using the motor mapping and pin assignments documented above.
