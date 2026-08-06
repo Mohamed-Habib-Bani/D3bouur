@@ -335,36 +335,38 @@ A complete, detailed step-by-step document exists separately: **`D3BOUUR_Phase2_
 
 1. **ROS 2 installation** — ✅ Done
 2. **Simulation setup & testing** — ✅ Mostly done (paused before final spawn test)
-3. **Power system build & validation** — 📋 Planned in detail, not started
-4. **Physical chassis assembly** — Not started
-5. **Basic movement** (Arduino↔Pi serial bridge, drive commands) — Not started
-6. **Ultrasonic sensors & reflex safety** — Not started
+3. **Power system build & validation** — In progress, blocked on the Pi 5 power module (see Section 7/8) — servo/sensor and motor branch voltage verified, Pi branch not
+4. **Physical chassis assembly** — ✅ Essentially complete (see §13) — camera/mic/speaker mounting spots reserved only, pending parts
+5. **Basic movement** (Arduino↔Pi serial bridge, drive commands) — ✅ Milestone reached, confirmed working end-to-end including motor direction compensation
+6. **Ultrasonic sensors & reflex safety** — Sensors wired/verified individually and combined; reflex-safety logic (tying sensor data into automatic stopping) not yet built
 7. **Navigation (Nav2) on real hardware** — Not started
-8. **Camera integration** — Blocked on delivery
-9. **Conversation brain** (LLM comparison test done — §15; layered LLM module + real RAG knowledge base built and verified — §16; STT/TTS still not started) — In progress
-10. **Screen & head servo** — Not started
-11. **Behavior state machine on real hardware** — Not started
+8. **Camera integration** — Blocked on RTSP/ONVIF capability test of the delivered V380 Pro (see §13)
+9. **Conversation brain** — ✅ Substantially done: LLM comparison (§15), RAG knowledge base + Ollama-primary routing (§16), STT/TTS comparison + Piper TTS wired into the pipeline (§17). Not yet done: no live STT input (visitor speech still simulated as typed text everywhere it's tested), no real mic.
+10. **Screen & head servo** — Servo hardware working physically (time-based, not angle-based). Screen software substantially built: FastAPI catalog/contact interface (§19) and an animated kiosk face reacting to state/speech/head-turn (§19) — both browser-tested only, not yet run on the real screen in kiosk mode, and the face's state/head-turn triggers are still simulated via debug controls, not wired to the real state machine or Arduino servo signal.
+11. **Behavior state machine** — ✅ Core logic built and tested (§18) — plain Python module (not yet a ROS 2 node/topics), all transitions verified with the real ConversationBrain. Not yet wired to real sensors, the real screen, or manual override.
 12. **Remote control** (hotspot + WebSocket + control app) — Not started
-13. **Interface content & config database** — Blocked on content availability (training catalog/events/videos exist in folders, not yet reviewed for what's usable)
+13. **Interface content & config database** — ✅ Substantially resolved: real AcaROBOTICS content wired into the catalog UI (§19), SQLite for contact form submissions, a scheduled content-refresh pipeline with a human review gate (§20). Events page still a placeholder (no real event data source yet); video list is the raw, uncurated extraction.
 14. **Full integration, polish & documentation** — Not started
 
 ---
 
 ## 10. Open Items / Unresolved Questions
 
-- **Camera exact model/control protocol** — unknown until delivery arrives; determines RS485 vs. network integration approach.
-- **Mic/speaker exact models** — unknown until delivery; likely USB.
-- **Speech recognition tool** — options open (Vosk vs. local Whisper), decision deferred to testing phase.
-- **Text-to-speech tool** — options open (espeak vs. Piper), decision deferred.
-- **Face recognition library** — options open (`face_recognition` vs. lighter MediaPipe-based approach), decision deferred.
-- **Config database contents/tech** — not finalized (likely SQLite).
+- **Camera exact model/control protocol** — unknown until delivery arrives; determines RS485 vs. network integration approach. (Camera has since arrived — see §13 — but the RTSP/ONVIF test itself is still not done.)
+- **Mic/speaker exact models** — unknown until delivery; likely USB. Still pending — this is what's blocking a real STT input test (§17's STT comparison used synthesized reference audio, not a real mic, precisely because of this).
+- **Speech recognition tool — narrowed, not decided**: Vosk (small-fr) vs. whisper.cpp (base) compared on this dev machine (§17). Result was a real but limited signal, not a decision — both engines struggled more than expected against synthesized (not real human) audio, and this machine is x86 while the Pi 5 is ARM, so relative speed could differ. Needs a re-run with real recorded/live speech, on the Pi 5, before committing.
+- **Text-to-speech tool — resolved**: Piper (`fr_FR-siwis-medium` voice) chosen over espeak-ng after a listening comparison (§17) — clearly more natural, ~50x slower to generate, judged an acceptable tradeoff. Wired into the real conversation pipeline and into the kiosk face's mouth-sync (§19).
+- **Face recognition library** — options open (`face_recognition` vs. lighter MediaPipe-based approach), decision deferred. Not started at all yet — the kiosk "face" built so far (§19) is D3BOUUR's own animated expression display, unrelated to recognizing visitors' faces.
+- **Config database contents/tech — partially resolved**: SQLite now used for contact form submissions (`d3bouur_interface`, §19) via stdlib `sqlite3` — no new dependency. The broader "robot settings" config database question is still open; this only resolved the one piece that needed storage so far.
 - **LLM final choice — resolved for now**: the production conversation module (`d3bouur_conversation`, §16) uses local Ollama as primary with OpenRouter (free-tier cloud models) as an opportunistic secondary, the reverse of the original assumption. Three different OpenRouter free models were tested against real content and each had a distinct reliability problem (garbled output + fabrication, shared-pool rate limiting, leaked reasoning traces); Ollama was consistently available and accurate. Revisit if OpenRouter's free-tier reliability improves, or if the LLM budget conversation with the supervisor (below) leads to a paid tier worth testing. Original Ollama/Groq/Gemini comparison in §15 still stands as the historical record of why RAG was deemed mandatory.
-- **AcaROBOTICS website has a real content gap, not just a D3BOUUR problem**: the live site's "Courses" page is unmodified WordPress LMS demo/placeholder content (fake courses like "Nutrition" and "PHP Beginners," same fake instructor, mismatched categories) — not excluded from D3BOUUR alone; worth flagging to whoever manages the website.
+- **AcaROBOTICS website has a real content gap, not just a D3BOUUR problem**: the live site's "Courses" page (`/ourcourses/`) is unmodified WordPress LMS demo/placeholder content (fake courses like "Nutrition" and "PHP Beginners," same fake instructor, mismatched categories) — not excluded from D3BOUUR alone; worth flagging to whoever manages the website. Still true as of 2026-08-06 (confirmed by the content pipeline, §20, which deliberately keeps tracking this exact page and will flag it explicitly in its review summary if it's ever replaced with real content).
 - **BLOCKED — Pi 5 dedicated power module** — genuine, documented blocker (see Phase 2 section above for full detail). Using borrowed phone charger for development in the meantime. Needs discussion with project supervisor for sourcing options.
 - **Motor branch runs unfused** — confirmed decision given fuse unobtainable; requires strict manual safety precautions every session (see Phase 2 document).
 - **HW-130 EXT_PWR jumper position** — needs physical, in-person verification before wiring motor power (see Section 4).
-- **Interface content readiness** — folders of event photos/videos exist, but haven't been reviewed for what's actually usable in the final interface.
+- **Interface content readiness — resolved for the catalog itself**: the real `knowledge/*.md` content (already reviewed/curated for the conversation brain) and the raw YouTube extraction now drive the actual catalog UI (§19), not folders of unreviewed files. Two things still genuinely open: the **events page has no real data source at all** (pure placeholder), and the **video list is the raw, uncurated extraction** (~40 entries, mixed real AcaROBOTICS content and unrelated podcast clips) — picking which videos to feature is still an unmade editorial decision.
 - **LLM budget conversation with boss** — recommended but not yet confirmed: whether AcaROBOTICS will cover a small API cost (a few dollars total) vs. staying fully local/free.
+- **RAG-match confidence is not reliable yet at this corpus size** — the kiosk face's info-display trigger (§19) uses knowledge-base similarity to decide whether a visitor's question is "real" enough to switch the screen. Measured directly: real-topic and off-topic questions overlap in similarity score (0.50-0.61 both, e.g. a football-score question scored *higher* than a genuine training-program question). A raised threshold (0.55) helps but doesn't fix it — this needs either a bigger knowledge base (the content pipeline, §20, is the path to that) or a smarter relevance check, not more threshold tuning.
+- **State machine, kiosk face, and real hardware are all still separately simulated, not wired together** — the behavior state machine (§18) reacts to Python method calls from a test script; the kiosk face (§19) reacts to debug-panel buttons; neither talks to the other, and neither talks to real sensors, the real Arduino servo signal, or a real mic/STT input yet. Every trigger point was deliberately built as a clean, swappable function call (e.g. `face.headTurn(direction, durationMs)`) specifically so wiring the real signal in later doesn't require restructuring anything — but that wiring itself hasn't been done.
 
 ---
 
@@ -507,12 +509,22 @@ The PTZ camera has arrived and is identified as a **V380 Pro** — a consumer sm
 ---
 
 ## 14. Recommended Immediate Next Steps
-1. Finish Phase 3 physical assembly: mount battery, Pi, Arduino+HW-130 inside the base box; wire and mount all 6 ultrasonic sensors per the pin table above; mount the screen in the head with service-loop wiring.
-2. Source a proper Pi 5 power module (see Section 7/Phase 2 for full detail on the blocker) — this is the one real outstanding hardware gap, worth raising with the project supervisor.
-3. Get a basic spare USB charger for the screen (separate from the Pi's borrowed charger) so both can run simultaneously during testing.
-4. Push the `ros2_ws` Git repository to GitHub, and add any collaborators for real shared, versioned access going forward (this handoff document should live there too, e.g. in a `docs/` folder).
-5. When the camera and mic/speaker arrive, identify their exact specs/protocols and update this document accordingly.
-6. Once Phase 3 is complete, move to Phase 4 (Arduino↔Pi serial bridge, basic movement) using the motor mapping and pin assignments documented above.
+
+*Superseded 2026-08-06 — items 1, 3, and 6 from the original list are done (see §13's Phase 3 status and the Phase 4 milestone note in CLAUDE.md's Phase status). Rewritten to reflect what's actually next now that the conversation/software side has grown well past where hardware currently is.*
+
+**Hardware (unchanged blockers — still the real gaps):**
+1. Source a proper Pi 5 power module (see Section 7/Phase 2) — the one real outstanding hardware gap, worth raising with the project supervisor.
+2. Source a proper 3-5A fuse for the motor branch, currently unfused by deliberate decision with manual precautions only.
+3. Run the RTSP/ONVIF capability test on the delivered V380 Pro camera (§13) — this single test gates camera integration, and by extension real person-detection/head-orientation triggers for both the state machine (§18) and the kiosk face's head-turn reaction (§19).
+4. When mic/speaker hardware arrives, wire it up and re-run the STT comparison (§17) with real recorded/live speech instead of synthesized reference audio — the current result is a narrowing signal, not a decision.
+5. Push the `ros2_ws` Git repository to GitHub (still local-only) — this handoff doc should live there too.
+
+**Software (new — wiring the pieces already built together):**
+6. Wire the behavior state machine (§18) into real ROS 2 topics/nodes once there's something real for it to subscribe to (camera/ultrasonic person-detection) — currently a plain Python module driven only by direct method calls from a test script, by design, until this step.
+7. Connect the kiosk face (§19) to the real behavior state machine instead of its debug-panel buttons — same "swap the trigger, not the code" pattern already built in (e.g. `face.headTurn()`, `face.setRobotState()`).
+8. Wire real STT into the conversation pipeline — nothing today feeds real visitor speech into `ConversationBrain`; every test so far (demo scripts, the kiosk's "simulate visitor question" box) types text in directly.
+9. Decide what to do about the RAG-match confidence problem (§10, new item) before leaning on it for anything visitor-facing — likely needs the content pipeline (§20) to grow the knowledge base first.
+10. Review/curate the video list and source real event data — both currently placeholders in the catalog UI (§19).
 
 ---
 
@@ -570,3 +582,59 @@ Local Ollama, across all of this testing, was available every time and correct a
 - Markdown formatting (`**bold**`, bullet lists) appearing in model output, which a TTS engine would read literally — fixed with a persona instruction (plain text only).
 
 **Known, not yet solved**: no defense exists against a coherent-but-wrong answer in the model's *own* language (the reasoning-trace leak, or a fluent but fabricated fact) — the character-set/truncation checks only catch structurally broken output, not confidently-wrong-but-well-formed output. The RAG grounding instruction is the main defense against fabrication for AcaROBOTICS-specific facts; general-knowledge questions have no equivalent grounding and rely on model quality alone.
+
+---
+
+## 17. STT/TTS Comparison and Piper Integration (executed 2026-08-06)
+
+**STT — Vosk vs. whisper.cpp, a narrowing signal, not a decision**: compared Vosk's small French model against whisper.cpp's `base` (multilingual — whisper has no French-only model) on 5 realistic visitor phrases. Scripts and results: `ros2_ws/scripts/stt_comparison/`. Result: whisper.cpp was faster (1.3s avg vs. Vosk's 2.2s, even including whisper's per-call model-reload cost that a real integration would eliminate), but Vosk was more accurate (WER 0.41 vs. 0.59). **Two real limitations, not swept under the rug**: (1) this dev machine is x86 (WSL2), the target is the Pi 5's ARM — Kaldi (Vosk) and transformer (whisper) architectures scale differently across that boundary, so the speed ranking could flip. (2) No microphone exists on this dev machine, so ground-truth audio was synthesized with espeak-ng rather than recorded — both engines struggled more than expected, likely because espeak's flat prosody is a harder input than real speech despite being "clean" audio. Both need re-running with real recorded/live speech, on the Pi 5, before this becomes an actual decision — agreed with the project owner as an explicit follow-up, not forgotten.
+
+**TTS — Piper chosen over espeak-ng, by ear, not by benchmark**: compared espeak-ng against Piper (`fr_FR-siwis-medium` voice) using D3BOUUR's own real generated replies (via `ConversationBrain`, not canned text) as the test material. Scripts and results: `ros2_ws/scripts/tts_comparison/`. Piper averaged ~2.1s to generate vs. espeak-ng's ~42ms (roughly 50x slower) — but after listening to both, Piper was clearly more natural and was chosen despite the speed cost. The voice model lives at `ros2_ws/models/piper/` (gitignored binary, tracked README with re-download instructions — same `.onnx` file works on the Pi 5 unmodified, ONNX isn't architecture-specific).
+
+**Wired into the real pipeline, not just the comparison scripts**: `d3bouur_conversation/d3bouur_conversation/tts.py`'s `PiperTTS` class loads the voice once (not per-call — the comparison script deliberately reloads per call only to give espeak-ng's CLI a fair timing comparison) and exposes `synthesize_to_file()`, `synthesize_bytes()` (in-memory, used by the web interface's `/api/speak` endpoint), and `speak()` (best-effort local playback via `aplay`, which correctly reports failure rather than crashing on this dev machine's no-audio-output WSL2 environment). `demo_chat.py` now actually speaks every conversation turn.
+
+**A real bug this surfaced, fixed at the source**: while testing, `formations`/`événements` questions came back as multi-paragraph, list-everything answers — technically accurate but unnatural to have read aloud and too long for a real spoken exchange. Root cause was `persona.py` never actually constraining response length despite already asking for "spoken-style" replies. Fixed with an explicit 2-sentence/40-word cap; re-verified against the same two questions — not perfectly on-budget every time (normal instruction-following imprecision for a local 3B model), but the actual problem (dumping an entire list in one turn) is gone.
+
+---
+
+## 18. Behavior State Machine (`d3bouur_behavior`, built 2026-08-06)
+
+**Deliberately plain Python, not a ROS 2 node — for now.** The architecture in §5 describes the state machine as a ROS 2 node with topics to/from perception, navigation, and conversation. None of those other nodes exist yet, so a topic-based design today would be plumbing with nothing real on either end — this was an explicit choice (confirmed with the project owner) to mirror how `d3bouur_conversation` was built: a framework-agnostic, directly-testable class first, wrapped in a thin `rclpy` node later once there's something real to subscribe to.
+
+**States**: `MOVING` → `PERSON_DETECTED` (real but currently-instant state — its `_orient_toward_person()` stub is exactly where the real stop-and-turn-servo call goes later) → `ENGAGING`, with two ways back to `MOVING`: **Natural End** (`conversation_ended()`) and **Timeout** (`tick()`, called periodically, checks elapsed time since last activity — default 8s, matches the "~5-10s, to be tuned during testing" requirement from §6). No separate "Resume" state — resuming is just re-entering `MOVING`, which has no behavior of its own beyond that.
+
+**Decoupled from `ConversationBrain` by structural typing**, not a concrete import — the state machine only needs an object with `.chat(text)`; a broad `except Exception` around that call means a broken LLM call can never crash the state machine mid-demo, which matters given this robot's whole purpose is live, in-person demos.
+
+**Verified end-to-end with the real `ConversationBrain`** (`d3bouur_behavior/demo_state_machine.py`, real Ollama calls, not stubs): Natural End path, Timeout path (waited out the real 6s in the demo run, confirmed it fires exactly at the timeout mark, not early or late), and a robustness check (firing an event in a state that doesn't expect it — e.g. `conversation_ended()` while `MOVING` — is logged and ignored, not a crash).
+
+**Not yet done**: no ROS 2 wrapping (see above), no wiring to real person-detection or a real screen, and no manual-override handling (§6 mentions WebSocket remote control must be able to preempt this state machine outright — not addressed here, worth remembering when that gets built since it'll need to sit above/around this state machine, not just feed it events like everything else does).
+
+---
+
+## 19. Web Interface + Kiosk Face (`d3bouur_interface`, built 2026-08-06)
+
+**Two screen modes in one FastAPI app**: a server-rendered catalog site (`/`, `/formations`, `/evenements`, `/videos`, `/contact`) and a separate fullscreen kiosk page (`/kiosk`) with D3BOUUR's animated face. Server-rendered Jinja2 rather than a JSON API + JS frontend for the catalog — this is a brochure-style, mostly-static site, and SSR is the lighter option for something that needs to run smoothly in kiosk mode on the Pi. Catalog content is read directly from `d3bouur_conversation/knowledge/*.md` and `youtube_extract_draft.json` at request time — one source of truth for what D3BOUUR knows, whether spoken or shown on screen, not a duplicated copy. Contact form submissions save to SQLite (`data/contacts.db`, gitignored); no email integration yet, deliberately deferred.
+
+**The kiosk face** (`static/face.js`, canvas-based, RoboEyes-inspired — simple geometric eyes + mouth, not a realistic face): mood-based eye shapes (neutral/happy/curious/thinking) with lerp interpolation everywhere (nothing snaps — `1 - exp(-speed*dt)`, framerate-independent), idle personality on independent randomized timers (blink, small look-around glances, occasional wink, a bigger rarer "curious-widen" moment), continuous subtle breathing, and squash-and-stretch blinks (eyes bulge wider as they compress, not just a flat height tween). Mouth animation is amplitude-only — real Piper audio through a Web Audio `AnalyserNode`, RMS amplitude mapped to mouth height — deliberately not a phoneme/viseme system, per the project owner's explicit direction to keep this simple.
+
+**Color is tied to the actual state machine, not decorative**: `robotState` uses the same three string values as `BehaviorStateMachine.State.value` (`moving_mapping`/`person_detected`/`engaging`), so the color mapping is a lookup table against the real system. "Speaking" isn't a manually-set 4th state — it's derived from `isSpeaking` while `engaging`, because in the real system D3BOUUR can only talk while engaged. The page background crossfades through the same per-state colors, just lightened (72% toward white) so the eyes stay visible against their own state's hue rather than disappearing into it.
+
+**Head-turn reaction, built as a clean hardware-wiring point**: `face.headTurn(direction, durationMs)` shifts the eyes and tilts the whole face (currently ±20°, tuned up from an initial ±5° that read as too subtle) toward the servo's turn direction, holding until told otherwise — no auto-return-to-center, matching the head servo's actual behavior (continuous-rotation, no position feedback, so it doesn't have a rest position of its own either). `durationMs` isn't decorative — it paces the tilt's lerp speed, so a slow simulated turn genuinely animates slower, not just logs a different number. The only thing that needs to change when the real Arduino servo signal exists is the caller (currently a debug-panel button); `face.js` itself doesn't change.
+
+**Info-display mode wired to real RAG, with an honestly-flagged limitation**: a "simulate visitor question" debug control calls `/api/rag-query`, which runs the real `KnowledgeBase.search()` and — if there's a real match — switches the kiosk to an `<iframe>` showing the relevant catalog page (e.g. the AcaJunior program), auto-returning to the face after 45s of no input. **Measured limitation, not fixed, deliberately not over-tuned**: real-topic and off-topic query similarity scores overlap (0.50-0.61 both ways) at this knowledge-base size — a raised threshold (0.55, in `app.py`, well-commented) trims the worst false positives but doesn't cleanly separate them. Accepted as a known limitation to revisit once the content pipeline (§20) has grown the corpus, not something to keep chasing with this one number.
+
+**Testing status**: everything above verified in a browser on this dev machine (curl for the API endpoints, manual reasoning + code review for the canvas rendering since no browser/display exists in this environment to screenshot). Not yet run on the actual Pi screen in kiosk mode, and every trigger (person-detected, head-turn, robot state, speaking) is a debug-panel button standing in for a real signal that doesn't exist yet (no real sensors, no real Arduino servo callback, no real STT).
+
+---
+
+## 20. Content Pipeline: Scheduled Fetch with a Staged Review Gate (built 2026-08-06)
+
+**Why this exists**: automating website/YouTube content refresh risked repeating the exact mistake caught manually during the original content review (§16) — a WordPress "Courses" page full of generic demo categories that was never real AcaROBOTICS content. The project owner was explicit: convenience is fine, but not at the cost of the review step that caught that.
+
+**Design**: `check_for_updates.py` fetches the AcaROBOTICS site's known pages (discovered from the homepage's own nav links by URL slug, not hardcoded — resilient to menu changes, avoids guessing URLs) and the YouTube channel, diffs against the currently *published* draft files (`website_extract_draft.json`, `youtube_extract_draft.json` — both gitignored, both the "human has reviewed and accepted this" baseline), and writes a plain-language Markdown review summary plus a staged snapshot — touching nothing else. `publish_content.py` is the one-command promotion of that staged snapshot into the published draft files, on request only. **Critically, this does not touch `knowledge/*.md` or the RAG index** — turning reviewed draft content into what D3BOUUR actually says stays a separate, deliberate human step, same as it always was for the YouTube draft. That's the one thing this pipeline intentionally does not automate.
+
+**The `/ourcourses/` page (the known placeholder-content page) is deliberately still tracked** — if it's ever replaced with real content, the review summary calls it out explicitly with a note pointing back at this history, rather than treating it as a routine diff.
+
+**Verified end-to-end**: first run correctly flagged all 5 tracked pages as new plus 1 real new YouTube video; after publishing, a second run correctly reported no changes (no false positives on a re-run of unchanged content).
+
+**Not yet done**: no cron job installed — the project owner explicitly asked to hold off until this runs somewhere always-on (the Pi 5), since a cron entry on this WSL2 dev machine wouldn't fire reliably. The exact crontab line (weekly, Monday 06:00) is documented in `ros2_ws/src/d3bouur_conversation/content_pipeline/README.md`, ready to add once deployed.
