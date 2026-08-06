@@ -1,0 +1,62 @@
+<!DOCTYPE html>
+<html lang="fr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+    <title>D3BOUUR</title>
+    <link rel="stylesheet" href="{{ url_for('static', path='kiosk.css') }}">
+</head>
+<body>
+    <div id="face-container">
+        <canvas id="face-canvas"></canvas>
+    </div>
+    <iframe id="info-frame" title="Interface D3BOUUR"></iframe>
+
+    <div id="debug-panel">
+        <strong>Debug / test controls</strong>
+        <span class="debug-note">— simulate what real hardware/STT will trigger later; not part of the final kiosk UI</span>
+
+        <div class="debug-row">
+            <span>Mood:</span>
+            <button type="button" data-mood="neutral">Neutral</button>
+            <button type="button" data-mood="happy">Happy</button>
+            <button type="button" data-mood="curious">Curious</button>
+            <button type="button" data-mood="thinking">Thinking</button>
+        </div>
+
+        <div class="debug-row">
+            <span>Robot state:</span>
+            <button type="button" data-robot-state="moving_mapping">Idle / moving</button>
+            <button type="button" id="person-detected-btn">Person detected</button>
+            <button type="button" data-robot-state="engaging">Engaging / listening</button>
+        </div>
+
+        <div class="debug-row">
+            <span>Head turn:</span>
+            <button type="button" data-head-turn="left">Left</button>
+            <button type="button" data-head-turn="center">Center</button>
+            <button type="button" data-head-turn="right">Right</button>
+            <input type="number" id="head-turn-duration" value="900" min="150" max="4000" step="50">
+            <span class="debug-note">ms — rough, continuous-rotation servo has no position feedback</span>
+        </div>
+
+        <form id="say-form" class="debug-row">
+            <input type="text" id="say-input" value="Bonjour ! Je suis D3BOUUR, votre robot d'accueil." placeholder="Texte à faire dire à D3BOUUR...">
+            <button type="submit">Say this (real Piper audio)</button>
+        </form>
+
+        <form id="rag-form" class="debug-row">
+            <input type="text" id="rag-input" value="Quelles formations proposez-vous ?" placeholder="Question simulée d'un visiteur...">
+            <button type="submit">Simulate visitor question</button>
+        </form>
+
+        <div class="debug-row">
+            <button type="button" id="back-to-face-btn">Back to face mode</button>
+        </div>
+
+        <div id="debug-log"></div>
+    </div>
+
+    <script type="module" src="{{ url_for('static', path='kiosk.js') }}"></script>
+</body>
+</html>

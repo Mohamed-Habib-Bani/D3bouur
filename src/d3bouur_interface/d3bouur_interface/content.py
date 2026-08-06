@@ -66,6 +66,24 @@ def load_training_programs() -> list[TrainingProgram]:
     ]
 
 
+# Maps a knowledge base source filename (RetrievedChunk.source, from
+# d3bouur_conversation's RAG search) to the catalog page that covers that
+# same content — used by the kiosk's info-display mode to show the right
+# page when a visitor's question gets a real RAG match. Kept as an explicit
+# table rather than inferred from the filename, since the mapping is a
+# content decision, not a mechanical one.
+SOURCE_TO_PAGE = {
+    "company_identite.md": "/",
+    "programme_acajunior.md": "/formations#acajunior",
+    "programme_acasenior.md": "/formations#acasenior",
+    "contact.md": "/contact",
+}
+
+
+def page_url_for_source(source: str) -> str | None:
+    return SOURCE_TO_PAGE.get(source)
+
+
 def load_videos() -> list[Video]:
     if not YOUTUBE_DRAFT_PATH.exists():
         logger.warning("youtube extract not found: %s", YOUTUBE_DRAFT_PATH)

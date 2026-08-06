@@ -9,6 +9,7 @@ timing comparison — that reload cost is exactly what a live conversation
 can't afford to pay on every reply.
 """
 
+import io
 import logging
 import os
 import shutil
@@ -42,9 +43,17 @@ class PiperTTS:
         logger.info("Loading Piper voice from %s", model_path)
         self.voice = PiperVoice.load(str(model_path))
 
-    def synthesize_to_file(self, text: str, out_path: Path) -> Path:
-        with wave.open(str(out_path), "wb") as wav_file:
+    def synthesize_bytes(self, text: str) -> bytes:
+        """Synthesizes `text` to WAV bytes in memory — no disk I/O. Used by
+        d3bouur_interface's /api/speak endpoint, which returns the audio
+        straight to the browser for playback + mouth-sync analysis."""
+        buffer = io.BytesIO()
+        with wave.open(buffer, "wb") as wav_file:
             self.voice.synthesize_wav(text, wav_file)
+        return buffer.getvalue()
+
+    def synthesize_to_file(self, text: str, out_path: Path) -> Path:
+        out_path.write_bytes(self.synthesize_bytes(text))
         return out_path
 
     def speak(self, text: str, out_path: Path) -> bool:
