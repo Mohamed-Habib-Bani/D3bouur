@@ -9,6 +9,8 @@ __pycache__/
 # Derived/regeneratable, not source content
 knowledge_index.json
 youtube_extract_draft.json
+website_extract_draft.json
+src/d3bouur_conversation/staging/
 
 # STT/TTS comparison test artifacts (synthesized/generated audio, not source)
 scripts/stt_comparison/test_audio/
@@ -21,3 +23,6 @@ models/**/*.onnx.json
 
 # demo_chat.py's spoken output, regenerated each run
 src/d3bouur_conversation/spoken_replies/
+
+# Contact form submissions — local data, not source content
+src/d3bouur_interface/data/*.db

@@ -10,7 +10,7 @@ setup(
         ('share/ament_index/resource_index/packages', ['resource/' + package_name]),
         ('share/' + package_name, ['package.xml']),
     ],
-    install_requires=['setuptools', 'requests', 'piper-tts'],
+    install_requires=['setuptools', 'requests', 'piper-tts', 'beautifulsoup4', 'lxml'],
     zip_safe=True,
     maintainer='d3bouur',
     maintainer_email='mohamedbani0605@gmail.com',

@@ -8,75 +8,23 @@ Run from this directory:
 
 Writes the raw extracted text to youtube_extract_draft.json for review —
 this script does NOT touch knowledge/ or the index itself.
+
+For the scheduled version that also checks the website and produces a
+review summary of what changed, see check_for_updates.py.
 """
 
 import json
+import os
 import sys
 from pathlib import Path
 
-import requests
-
-from d3bouur_conversation.llm_router import _load_env_file, _default_env_path
+from d3bouur_conversation.content_pipeline.youtube_fetch import fetch_channel_videos
+from d3bouur_conversation.llm_router import _default_env_path, _load_env_file
 
 _load_env_file(_default_env_path())
 
-import os
-
 API_KEY = os.environ.get("YOUTUBE_API_KEY")
-CHANNEL_HANDLE = "acarobotics4006"
-API_BASE = "https://www.googleapis.com/youtube/v3"
 OUTPUT_PATH = Path(__file__).resolve().parent / "youtube_extract_draft.json"
-
-
-def get_uploads_playlist_id(handle: str) -> str:
-    resp = requests.get(
-        f"{API_BASE}/channels",
-        params={"part": "contentDetails,snippet", "forHandle": handle, "key": API_KEY},
-        timeout=15,
-    )
-    resp.raise_for_status()
-    data = resp.json()
-    items = data.get("items", [])
-    if not items:
-        raise RuntimeError(f"no channel found for handle @{handle}: {data}")
-    channel = items[0]
-    print(f"Resolved channel: {channel['snippet']['title']} (id={channel['id']})")
-    return channel["contentDetails"]["relatedPlaylists"]["uploads"]
-
-
-def fetch_all_videos(uploads_playlist_id: str) -> list:
-    videos = []
-    page_token = None
-    while True:
-        params = {
-            "part": "snippet",
-            "playlistId": uploads_playlist_id,
-            "maxResults": 50,
-            "key": API_KEY,
-        }
-        if page_token:
-            params["pageToken"] = page_token
-
-        resp = requests.get(f"{API_BASE}/playlistItems", params=params, timeout=15)
-        resp.raise_for_status()
-        data = resp.json()
-
-        for item in data.get("items", []):
-            snippet = item["snippet"]
-            videos.append(
-                {
-                    "video_id": snippet["resourceId"]["videoId"],
-                    "title": snippet["title"],
-                    "description": snippet["description"],
-                    "published_at": snippet["publishedAt"],
-                }
-            )
-
-        page_token = data.get("nextPageToken")
-        if not page_token:
-            break
-
-    return videos
 
 
 def main() -> None:
@@ -84,8 +32,7 @@ def main() -> None:
         print("ERROR: YOUTUBE_API_KEY not set", file=sys.stderr)
         sys.exit(1)
 
-    uploads_playlist_id = get_uploads_playlist_id(CHANNEL_HANDLE)
-    videos = fetch_all_videos(uploads_playlist_id)
+    videos = fetch_channel_videos(API_KEY)
 
     OUTPUT_PATH.write_text(json.dumps(videos, ensure_ascii=False, indent=2))
     print(f"\nFetched {len(videos)} videos. Written to {OUTPUT_PATH}")
