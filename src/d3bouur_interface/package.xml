@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<?xml-model href="http://download.ros.org/schema/package_format3.xsd" schematypens="http://www.w3.org/2001/XMLSchema"?>
+<package format="3">
+  <name>d3bouur_interface</name>
+  <version>0.0.1</version>
+  <description>D3BOUUR screen web interface: FastAPI catalog/events/videos/contact-form UI (Module Interface Graphique, browsing mode — separate from the face/conversation display mode).</description>
+  <maintainer email="mohamedbani0605@gmail.com">d3bouur</maintainer>
+  <license>TODO</license>
+
+  <export>
+    <build_type>ament_python</build_type>
+  </export>
+</package>

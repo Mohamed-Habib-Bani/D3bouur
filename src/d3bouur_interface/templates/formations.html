@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Formations{% endblock %}
+{% block content %}
+<h1>Nos formations</h1>
+{% for program in programs %}
+<section class="content-block" id="{{ program.slug }}">
+    <h2>{{ program.title }}</h2>
+    {{ program.html | safe }}
+</section>
+{% endfor %}
+{% endblock %}

@@ -1,0 +1,198 @@
+/* D3BOUUR interface — simple, clean, sized to work on a small kiosk screen
+   (target: 1024x600, the Pi's actual display) as well as a normal browser. */
+
+:root {
+    --brand: #2d6cdf;
+    --brand-dark: #1f4fae;
+    --bg: #f7f8fa;
+    --surface: #ffffff;
+    --text: #1c1f26;
+    --text-muted: #5a6270;
+    --border: #e1e4e9;
+    --success-bg: #e8f7ee;
+    --success-text: #1e7a43;
+}
+
+* {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    font-family: "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    line-height: 1.5;
+}
+
+.site-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    flex-wrap: wrap;
+    gap: 0.5rem;
+    padding: 0.75rem 1.5rem;
+    background: var(--surface);
+    border-bottom: 1px solid var(--border);
+    position: sticky;
+    top: 0;
+}
+
+.brand {
+    font-size: 1.25rem;
+    font-weight: 700;
+    color: var(--brand-dark);
+}
+
+.brand span {
+    font-weight: 400;
+    color: var(--text-muted);
+    font-size: 1rem;
+}
+
+nav a {
+    display: inline-block;
+    padding: 0.4rem 0.75rem;
+    margin-left: 0.25rem;
+    border-radius: 6px;
+    text-decoration: none;
+    color: var(--text);
+    font-weight: 500;
+}
+
+nav a:hover {
+    background: var(--bg);
+}
+
+nav a.active {
+    background: var(--brand);
+    color: white;
+}
+
+main {
+    max-width: 900px;
+    margin: 0 auto;
+    padding: 1.5rem;
+}
+
+.hero {
+    text-align: center;
+    padding: 1.5rem 0 2rem;
+}
+
+.hero h1 {
+    margin-bottom: 0.5rem;
+}
+
+.tagline {
+    color: var(--text-muted);
+    font-style: italic;
+}
+
+.content-block {
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    margin-bottom: 1.5rem;
+}
+
+.content-block ul {
+    padding-left: 1.25rem;
+}
+
+.placeholder,
+.placeholder-note {
+    color: var(--text-muted);
+}
+
+.placeholder {
+    background: var(--surface);
+    border: 1px dashed var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+}
+
+.video-list {
+    list-style: none;
+    padding: 0;
+}
+
+.video-list li {
+    display: flex;
+    justify-content: space-between;
+    gap: 1rem;
+    padding: 0.6rem 0;
+    border-bottom: 1px solid var(--border);
+}
+
+.video-list a {
+    color: var(--brand-dark);
+    text-decoration: none;
+}
+
+.video-list a:hover {
+    text-decoration: underline;
+}
+
+.video-date {
+    color: var(--text-muted);
+    white-space: nowrap;
+    font-size: 0.9rem;
+}
+
+.contact-form {
+    display: flex;
+    flex-direction: column;
+    gap: 0.4rem;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 1.25rem 1.5rem;
+    max-width: 480px;
+}
+
+.contact-form label {
+    font-weight: 600;
+    margin-top: 0.5rem;
+}
+
+.contact-form input,
+.contact-form textarea {
+    padding: 0.5rem 0.6rem;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    font-family: inherit;
+    font-size: 1rem;
+}
+
+.contact-form button {
+    margin-top: 1rem;
+    padding: 0.6rem 1rem;
+    border: none;
+    border-radius: 6px;
+    background: var(--brand);
+    color: white;
+    font-size: 1rem;
+    font-weight: 600;
+    cursor: pointer;
+    align-self: flex-start;
+}
+
+.contact-form button:hover {
+    background: var(--brand-dark);
+}
+
+.success-message {
+    background: var(--success-bg);
+    color: var(--success-text);
+    border-radius: 8px;
+    padding: 0.75rem 1rem;
+}
+
+.site-footer {
+    text-align: center;
+    color: var(--text-muted);
+    font-size: 0.85rem;
+    padding: 1.5rem;
+}

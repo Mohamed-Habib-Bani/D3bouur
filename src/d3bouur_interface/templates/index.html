@@ -1,0 +1,11 @@
+{% extends "base.html" %}
+{% block title %}Accueil{% endblock %}
+{% block content %}
+<section class="hero">
+    <h1>Bienvenue chez AcaROBOTICS</h1>
+    <p class="tagline">« Définissez votre parcours d'apprentissage avec nos solutions. »</p>
+</section>
+<section class="content-block">
+    {{ company_html | safe }}
+</section>
+{% endblock %}

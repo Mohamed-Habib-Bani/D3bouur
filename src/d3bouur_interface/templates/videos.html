@@ -1,0 +1,18 @@
+{% extends "base.html" %}
+{% block title %}Vidéos{% endblock %}
+{% block content %}
+<h1>Vidéos</h1>
+<p class="placeholder-note">Extraction brute de la chaîne YouTube AcaROBOTICS — liste non triée éditorialement, à affiner plus tard.</p>
+{% if videos %}
+<ul class="video-list">
+    {% for video in videos %}
+    <li>
+        <a href="{{ video.url }}" target="_blank" rel="noopener">{{ video.title }}</a>
+        <span class="video-date">{{ video.published_at[:10] }}</span>
+    </li>
+    {% endfor %}
+</ul>
+{% else %}
+<p>Aucune vidéo disponible pour le moment.</p>
+{% endif %}
+{% endblock %}
