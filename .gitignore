@@ -9,3 +9,15 @@ __pycache__/
 # Derived/regeneratable, not source content
 knowledge_index.json
 youtube_extract_draft.json
+
+# STT/TTS comparison test artifacts (synthesized/generated audio, not source)
+scripts/stt_comparison/test_audio/
+scripts/tts_comparison/output_audio/
+
+# Voice/model binaries — large, downloaded via README instructions, not committed
+# (READMEs alongside them under models/ are still tracked)
+models/**/*.onnx
+models/**/*.onnx.json
+
+# demo_chat.py's spoken output, regenerated each run
+src/d3bouur_conversation/spoken_replies/

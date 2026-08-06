@@ -6,6 +6,7 @@ from .llm_router import (
     LLMConfig,
     ProviderError,
 )
+from .tts import PiperTTS
 
 __all__ = [
     "ConversationBrain",
@@ -16,4 +17,5 @@ __all__ = [
     "KnowledgeBase",
     "RetrievedChunk",
     "EmbeddingError",
+    "PiperTTS",
 ]
