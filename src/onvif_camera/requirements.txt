@@ -1,1 +1,9 @@
-pythin onvif-zeep
+onvif-zeep
+opencv-python-headless
+numpy
+
+# Required by engage.py (face-presence engagement detection) and by
+# room_sweep.detect_in_sweep() (Stage 3 only — not needed for capture/stitch).
+# On Raspberry Pi OS this requires the 64-bit OS; mediapipe does not publish
+# 32-bit ARM wheels.
+mediapipe

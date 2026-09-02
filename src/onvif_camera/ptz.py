@@ -90,6 +90,18 @@ class PTZCamera:
         self.heartbeat_interval = heartbeat_interval
         self.stop_settle       = stop_settle
 
+        # The speed full_pan_time/full_tilt_time were actually measured at.
+        # Defaults to the constructor's speed (the common case: you build the
+        # object at your calibration speed). calibrate() updates this to
+        # self.speed at the moment it actually measures the times, so it
+        # stays correct even if you change self.speed before calibrating.
+        # move_to_pan()/move_to_tilt()/home() all scale their move duration
+        # by (calibration_speed / current speed) — without this, changing
+        # self.speed after calibrating silently makes every fractional move
+        # travel the wrong physical distance while dead-reckoning keeps
+        # reporting the intended (wrong) position as if it were reached.
+        self.calibration_speed = speed
+
         # Direction signs: set to -1 to flip an axis if the camera moves
         # opposite to what you expect.  Test with move_raw() and adjust.
         self.pan_sign  = 1
@@ -256,15 +268,42 @@ class PTZCamera:
     def _update_position(
         self, pan_dir: float, tilt_dir: float, speed: float, duration: float
     ) -> None:
+        # Denominator uses calibration_speed (the speed full_pan_time/
+        # full_tilt_time were actually measured at), NOT self.speed — self.speed
+        # is whatever the caller currently has set, which may differ (e.g. a
+        # sweep deliberately run slower than calibration). Using self.speed
+        # here made this silently wrong whenever the two diverged: the move's
+        # commanded duration (see duration_for_pan_fraction()) is scaled
+        # against calibration_speed, so the position update has to match that
+        # same reference or dead-reckoning drifts out of sync with reality.
         if self.full_pan_time and self.pan_pos is not None and pan_dir != 0:
-            delta = (pan_dir * speed * duration) / (self.full_pan_time * self.speed)
+            delta = (pan_dir * speed * duration) / (self.full_pan_time * self.calibration_speed)
             self.pan_pos = max(0.0, min(1.0, self.pan_pos + delta))
 
         if self.full_tilt_time and self.tilt_pos is not None and tilt_dir != 0:
-            delta = (tilt_dir * speed * duration) / (self.full_tilt_time * self.speed)
+            delta = (tilt_dir * speed * duration) / (self.full_tilt_time * self.calibration_speed)
             self.tilt_pos = max(0.0, min(1.0, self.tilt_pos + delta))
 
     # ─── Percentage-based movement ────────────────────────────────────────────
+
+    def duration_for_pan_fraction(self, fraction: float, speed: Optional[float] = None) -> float:
+        """
+        Seconds needed to traverse `fraction` (0.0-1.0) of the full pan range
+        at `speed` (defaults to self.speed). Scaled by
+        (calibration_speed / speed) so it stays correct even when speed
+        differs from whatever full_pan_time was actually measured at.
+        """
+        if self.full_pan_time is None:
+            raise RuntimeError("Pan not calibrated — run calibrate() first.")
+        spd = speed if speed is not None else self.speed
+        return abs(fraction) * self.full_pan_time * (self.calibration_speed / spd)
+
+    def duration_for_tilt_fraction(self, fraction: float, speed: Optional[float] = None) -> float:
+        """Tilt counterpart to duration_for_pan_fraction()."""
+        if self.full_tilt_time is None:
+            raise RuntimeError("Tilt not calibrated — run calibrate() first.")
+        spd = speed if speed is not None else self.speed
+        return abs(fraction) * self.full_tilt_time * (self.calibration_speed / spd)
 
     def move_to_pan(self, target: float, speed: Optional[float] = None) -> None:
         """
@@ -272,8 +311,6 @@ class PTZCamera:
         Requires calibration (full_pan_time must be set) and a known current
         position (pan_pos must not be None).
         """
-        if self.full_pan_time is None:
-            raise RuntimeError("Pan not calibrated — run calibrate() first.")
         if self.pan_pos is None:
             raise RuntimeError("Pan position unknown — reset_pan() to set a known origin.")
         spd    = speed if speed is not None else self.speed
@@ -281,7 +318,7 @@ class PTZCamera:
         if abs(diff) < 0.005:
             return
         direction = 1 if diff > 0 else -1
-        duration  = abs(diff) * self.full_pan_time
+        duration  = self.duration_for_pan_fraction(diff, speed=spd)
         self.move(direction, 0, duration, speed=spd)
 
     def move_to_tilt(self, target: float, speed: Optional[float] = None) -> None:
@@ -289,8 +326,6 @@ class PTZCamera:
         Move to a tilt position expressed as a fraction 0.0–1.0.
         Requires calibration and a known current tilt_pos.
         """
-        if self.full_tilt_time is None:
-            raise RuntimeError("Tilt not calibrated — run calibrate() first.")
         if self.tilt_pos is None:
             raise RuntimeError("Tilt position unknown — reset_tilt() to set a known origin.")
         spd    = speed if speed is not None else self.speed
@@ -298,7 +333,7 @@ class PTZCamera:
         if abs(diff) < 0.005:
             return
         direction = 1 if diff > 0 else -1
-        duration  = abs(diff) * self.full_tilt_time
+        duration  = self.duration_for_tilt_fraction(diff, speed=spd)
         self.move(0, direction, duration, speed=spd)
 
     # ─── Position reset ───────────────────────────────────────────────────────
@@ -318,6 +353,77 @@ class PTZCamera:
         """
         self.tilt_pos = value
         print(f"Tilt position reset to {value:.2f}")
+
+    def home(
+        self,
+        pan_target: float = 0.0,
+        tilt_target: float = 0.0,
+        margin: float = 1.25,
+    ) -> None:
+        """
+        Drive pan AND tilt simultaneously to a real, physically verified
+        extreme, then declare that position as the new dead-reckoning
+        reference for both axes.
+
+        Unlike reset_pan()/reset_tilt() alone — which only *declare* a
+        position and trust the caller to have actually put the camera there
+        (a real risk for tilt in particular, since there's rarely a
+        convenient way to manually verify it) — this method drives there
+        itself. It reuses the same overshoot trick calibrate() depends on:
+        commanding a move for longer than the measured full-range traversal
+        time guarantees hitting the physical/software limit before time runs
+        out, regardless of where the camera started. `margin` adds a safety
+        buffer on top of that (heartbeat/network jitter, calibration
+        imprecision) — default 1.25 (25% extra).
+
+        pan_target/tilt_target must each be 0.0 or 1.0 — an "extreme" can
+        only be reliably reached this way at the actual ends of the range,
+        never an intermediate position. Both axes move together using one
+        move_raw() call (it already accepts pan+tilt at once), and duration
+        is margin * max(full_pan_time, full_tilt_time) — the longer of the
+        two, so the slower axis is guaranteed saturated too even if it
+        started at its opposite extreme.
+
+        Works even before pan_pos/tilt_pos are known (e.g. right after
+        connect()), so this can replace a manual reset_pan(0.0) /
+        reset_tilt(<guess>) as the very first call after connect() +
+        calibrate() — every later move_to_pan()/move_to_tilt() is then
+        computed from a position that was actually verified, not assumed.
+
+        Duration is scaled by (calibration_speed / self.speed), so this is
+        safe to call even if self.speed has changed since calibrate() ran —
+        unlike move_to_pan()/move_to_tilt(), you don't need to restore the
+        calibration speed first.
+        """
+        if self.full_pan_time is None or self.full_tilt_time is None:
+            raise RuntimeError(
+                "Camera not calibrated — full_pan_time/full_tilt_time must be "
+                "set (see calibrate()) before home() can compute a safe duration."
+            )
+        if pan_target not in (0.0, 1.0) or tilt_target not in (0.0, 1.0):
+            raise ValueError(
+                "home() only drives to a real extreme — pan_target/tilt_target "
+                "must each be 0.0 or 1.0."
+            )
+
+        pan_dir  = -1.0 if pan_target  == 0.0 else 1.0
+        tilt_dir = -1.0 if tilt_target == 0.0 else 1.0
+        scale    = self.calibration_speed / self.speed
+        duration = margin * max(self.full_pan_time, self.full_tilt_time) * scale
+
+        print(
+            f"Homing both axes: pan toward {'0%' if pan_dir < 0 else '100%'}, "
+            f"tilt toward {'0%' if tilt_dir < 0 else '100%'}, "
+            f"for {duration:.1f}s ({margin:.2f}x the longer of "
+            f"full_pan_time={self.full_pan_time:.1f}s / full_tilt_time={self.full_tilt_time:.1f}s, "
+            f"scaled {scale:.2f}x for speed={self.speed} vs calibration_speed={self.calibration_speed}) "
+            "to guarantee both hit their limit..."
+        )
+        self.move_raw(pan_dir * self.speed, tilt_dir * self.speed, duration)
+
+        self.reset_pan(pan_target)
+        self.reset_tilt(tilt_target)
+        print("Homed — both axes now at a physically verified reference position.")
 
     def print_position(self) -> None:
         """Print current tracked position for both axes."""
@@ -344,25 +450,31 @@ class PTZCamera:
 
         After calibration, reset_pan(0.0) and reset_tilt(0.0) are called so
         position tracking begins from the calibrated 0% extreme.
+        calibration_speed is set to self.speed as it stood during this run —
+        move_to_pan()/move_to_tilt()/home() scale their durations against it,
+        so self.speed can be changed freely afterward (e.g. a slower sweep)
+        without breaking positioning.
         """
         self._require_connection()
         print("\n" + "=" * 60)
         print("  CALIBRATION")
         print("=" * 60)
         print(f"  Speed used for calibration: {self.speed}")
-        print("  Keep this the same speed for all future moves, OR re-calibrate")
-        print("  if you change self.speed.\n")
+        print("  self.speed can be changed after this — move_to_pan()/move_to_tilt()/")
+        print("  home() all scale against the speed measured here (calibration_speed).\n")
 
         self.full_pan_time  = self._calibrate_axis("PAN",  pan_dir=1,  tilt_dir=0)
         self.full_tilt_time = self._calibrate_axis("TILT", pan_dir=0,  tilt_dir=1)
+        self.calibration_speed = self.speed
 
         self.reset_pan(0.0)
         self.reset_tilt(0.0)
 
         print("\n" + "=" * 60)
         print("  Calibration complete!")
-        print(f"  full_pan_time  = {self.full_pan_time:.3f}")
-        print(f"  full_tilt_time = {self.full_tilt_time:.3f}")
+        print(f"  full_pan_time      = {self.full_pan_time:.3f}")
+        print(f"  full_tilt_time     = {self.full_tilt_time:.3f}")
+        print(f"  calibration_speed  = {self.calibration_speed}")
         print("  Copy these values into your config or PTZCamera constructor.")
         print("  Position has been set to (0.0, 0.0) — camera is at the")
         print("  extreme it was at when each timing run ended.")
@@ -416,3 +528,92 @@ class PTZCamera:
 
         print(f"  {axis} full-range time at speed {self.speed}: {elapsed:.3f} s")
         return elapsed
+
+    # ─── Level-tilt calibration ────────────────────────────────────────────────
+
+    def find_level_tilt(self, from_extreme: float = 0.0) -> float:
+        """
+        Interactive helper to measure the tilt fraction that gives a level,
+        room-height view — NOT assumed to be 0.5. A tilt range has no
+        guarantee of being centered on the horizon (e.g. a down-biased
+        mount can put the true level view well below the midpoint), so this
+        measures it against the real camera the same way calibrate()
+        measures full_pan_time/full_tilt_time: by timing a move against your
+        own judgement, not assuming a fraction.
+
+        Procedure:
+          1. Drives tilt to `from_extreme` (0.0 or 1.0) using the same
+             overshoot trick as home(), so timing starts from a real,
+             verified position rather than wherever tilt_pos claims to be.
+          2. Moves continuously away from that extreme. Watch the live feed
+             and press Enter the INSTANT the view looks level — room height,
+             not floor or ceiling. If the room's lower half is mostly
+             featureless flooring (which confuses panorama stitching), bias
+             slightly toward eye-level wall/furniture content instead of
+             literal geometric level.
+          3. Returns the measured fraction (and leaves the camera positioned
+             there, tilt_pos updated) — copy it into your LEVEL_TILT config
+             constant so future runs don't need to re-measure it.
+
+        Requires full_tilt_time to be set (calibrate() or set manually).
+        """
+        if self.full_tilt_time is None:
+            raise RuntimeError("Tilt not calibrated — run calibrate() first.")
+        if from_extreme not in (0.0, 1.0):
+            raise ValueError("from_extreme must be 0.0 or 1.0 — a real, overshoot-reachable extreme.")
+
+        # Tilt-only version of home()'s overshoot trick — drive to a verified
+        # extreme without touching pan.
+        home_dir = -1.0 if from_extreme == 0.0 else 1.0
+        scale    = self.calibration_speed / self.speed
+        home_duration = 1.25 * self.full_tilt_time * scale
+        print(f"Driving tilt to a verified {from_extreme:.0%} extreme ({home_duration:.1f}s)...")
+        self.move_raw(0.0, home_dir * self.speed, home_duration)
+        self.reset_tilt(from_extreme)
+
+        sweep_dir = -home_dir   # move away from the extreme just reached
+        tilt_vel  = sweep_dir * self.speed * self.tilt_sign
+        print(f"\nTilt is at a verified {from_extreme:.0%}. Moving toward the other extreme —")
+        print("watch the camera feed and press Enter the INSTANT the view looks level")
+        print("(room height, not floor or ceiling; bias toward eye-level detail over")
+        print("plain flooring if the two don't quite coincide).")
+
+        stop_event = threading.Event()
+        heartbeat_error: list = []
+
+        def heartbeat_loop():
+            try:
+                self._send_move(0.0, tilt_vel)
+                while not stop_event.wait(timeout=self.heartbeat_interval):
+                    self._send_move(0.0, tilt_vel)
+            except Exception as e:
+                heartbeat_error.append(e)
+                stop_event.set()
+
+        t_start = time.monotonic()
+        hb = threading.Thread(target=heartbeat_loop, daemon=True)
+        hb.start()
+
+        input("")   # blocks until Enter
+        elapsed = time.monotonic() - t_start
+
+        stop_event.set()
+        hb.join(timeout=self.heartbeat_interval + 1)
+
+        if heartbeat_error:
+            raise PTZConnectionError(
+                f"Lost connection during find_level_tilt(): {heartbeat_error[0]}"
+            ) from heartbeat_error[0]
+
+        self.stop()
+
+        # elapsed was measured at self.speed; convert back to a fraction of
+        # full_tilt_time via the same calibration_speed scaling used everywhere else.
+        fraction_moved = elapsed / (self.full_tilt_time * scale)
+        level_tilt = from_extreme + sweep_dir * fraction_moved
+        level_tilt = max(0.0, min(1.0, level_tilt))
+        self.tilt_pos = level_tilt
+
+        print(f"\nLevel tilt measured at {level_tilt:.3f} ({level_tilt:.0%}).")
+        print("Copy this into your LEVEL_TILT config constant.\n")
+        return level_tilt
