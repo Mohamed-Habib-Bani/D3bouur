@@ -25,6 +25,11 @@ scripts/tts_comparison/output_audio/
 # (READMEs alongside them under models/ are still tracked)
 models/**/*.onnx
 models/**/*.onnx.json
+models/vosk/vosk-model-small-fr-0.22/
+models/whisper/ggml-base.bin
+# Full whisper.cpp source+build tree (whisper-cli binary is machine-specific,
+# not portable to the Pi 5 — see models/whisper/README.md)
+models/whisper/whisper.cpp/
 
 # demo_chat.py's spoken output, regenerated each run
 src/d3bouur_conversation/spoken_replies/

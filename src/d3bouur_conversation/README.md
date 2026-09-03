@@ -13,9 +13,14 @@ TTS is confirmed generating real audio (`spoken_replies/*.wav`); playback
 itself is unverified on this dev machine (no audio output device — see
 [TTS](#4-tts--tts) below), not yet tested on the Pi's real speaker hardware.
 
-**What's NOT yet wired:** no live STT anywhere — every test so far has typed
-the visitor's words in as text. This module doesn't know or care where the
-text came from, so wiring in real STT output later needs zero changes here.
+**What's NOT yet wired:** `stt.py` exists and both engines are confirmed
+working through it (see [STT](#5-stt-sttpy--speechtotext--create_stt) below
+and `scripts/stt_comparison/test_stt_module.py`), but nothing feeds it real
+microphone audio yet — that test still uses espeak-ng-synthesized audio, the
+same as the original comparison. No mic is wired up in this dev environment
+at all. `ConversationBrain.chat()` itself is still fed typed text either
+way — it doesn't know or care where the text came from, so connecting real
+STT output to it needs zero changes on that side.
 
 ## What each piece does
 
@@ -99,6 +104,36 @@ loaded once and reused across calls (unlike the comparison script, which
 reloads per call to keep espeak-ng's timing fair — a live conversation can't
 afford that reload cost on every reply).
 
+### 5. STT (`stt.py` — `SpeechToText` / `create_stt`)
+
+Speech-to-text, wired the same way the LLM side handles Ollama vs.
+OpenRouter: one common interface (`SpeechToText.transcribe(pcm16_audio) ->
+str`), two implementations, and a config knob (`STTConfig.engine` /
+`STT_ENGINE` in `.env`) that picks which one `create_stt()` builds — swapping
+engines is a one-line config change, not a code change.
+
+- **`VoskSTT`** — Vosk's small French model (`vosk-model-small-fr-0.22`,
+  `models/vosk/` at the workspace root). Offline, pure-Python bindings, no
+  subprocess; the model is loaded once and reused, same reasoning as
+  `PiperTTS`.
+- **`WhisperCppSTT`** — whisper.cpp's `base` model (multilingual,
+  `models/whisper/ggml-base.bin`) via the `whisper-cli` binary. Unlike the
+  model weights, that binary is a compiled artifact tied to the machine it
+  was built on (`models/whisper/README.md`) — set `STT_WHISPER_CLI_PATH` per
+  machine, no portable default.
+
+**Deliberately not fallback-routed like the LLM providers**: one engine is
+selected explicitly and a failure raises `STTError` — silently swapping to a
+completely different STT engine mid-utterance isn't the same kind of safe
+fallback that "try the other network API" is for the LLM side.
+
+**Why still swappable rather than decided**: the earlier comparison
+(`scripts/stt_comparison/compare_stt.py`) ran both against espeak-ng-
+synthesized audio on this x86 dev machine — not real speech, not the Pi 5.
+Vosk scored more accurately there, whisper.cpp was faster, but neither
+ranking is trusted to hold on a real voice or real ARM hardware. See
+[Known limitations](#known-limitations-accepted-not-yet-fixed) below.
+
 ## How the RAG safety mechanism works
 
 The core hallucination fix, found directly during LLM comparison testing
@@ -134,12 +169,23 @@ single call with no fallback needed.
 
 ## Known limitations (accepted, not yet fixed)
 
-- **Markdown sometimes slips through.** One answer in the 9-question run
-  included markdown bullets (`*`) despite the persona's plain-text
-  instruction — content was accurate, formatting wasn't fully obeyed. Not
-  fixed at the source; the plan is to defensively strip markdown at the
-  eventual TTS integration point rather than relying on the model to never
-  produce it.
+- **STT engine choice is a narrowing signal, not a final decision.** Both
+  `VoskSTT` and `WhisperCppSTT` are wired and confirmed producing text
+  through the shared `SpeechToText` interface (`scripts/stt_comparison/test_stt_module.py`),
+  but that test — like the original comparison — uses espeak-ng-synthesized
+  audio on x86, not a real voice, and there is still no microphone in this
+  dev environment at all. Real accuracy and latency (and possibly the
+  Vosk-vs-whisper.cpp ranking itself) need to be re-measured with real
+  speech, on the Pi 5, before `STT_ENGINE` is set as a final choice rather
+  than a default.
+- **Markdown sometimes slips through — now handled defensively.** One answer
+  in the 9-question run included markdown bullets (`*`) despite the
+  persona's plain-text instruction — content was accurate, formatting
+  wasn't fully obeyed. Still not fixed at the source (the persona
+  instruction alone isn't reliable); `tts.py`'s `strip_markdown()` now
+  strips bold/italic, headers, bullet/numbered list markers, links, and
+  inline code before any text reaches Piper, so it no longer matters
+  whether the model complies.
 - **RAG-match confidence overlap.** `d3bouur_interface`'s kiosk uses this
   same `KnowledgeBase.search()` to decide whether a visitor's typed question
   is "real" enough to switch the screen. Measured directly: real-topic and
@@ -176,6 +222,10 @@ python3 build_index.py
 # Content pipeline (fetch + review-gated publish) — see content_pipeline/README.md
 python3 check_for_updates.py
 python3 publish_content.py
+
+# STT wiring test — both engines via the shared interface, synthetic audio
+cd ../../scripts/stt_comparison
+python3 test_stt_module.py
 ```
 
 No colcon build is required for the demos — they import the package

@@ -6,6 +6,7 @@ from .llm_router import (
     LLMConfig,
     ProviderError,
 )
+from .stt import STTConfig, STTError, SpeechToText, VoskSTT, WhisperCppSTT, create_stt
 from .tts import PiperTTS
 
 __all__ = [
@@ -18,4 +19,10 @@ __all__ = [
     "RetrievedChunk",
     "EmbeddingError",
     "PiperTTS",
+    "SpeechToText",
+    "STTConfig",
+    "STTError",
+    "VoskSTT",
+    "WhisperCppSTT",
+    "create_stt",
 ]
