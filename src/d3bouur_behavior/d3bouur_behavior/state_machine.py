@@ -2,7 +2,8 @@
 
 States (see docs/D3BOUUR_Project_Handoff.md §6 for the original design):
 
-    MOVING ----person_detected()----> PERSON_DETECTED --(auto)--> ENGAGING
+    MOVING ----person_detected()----> PERSON_DETECTED --orienting: ENGAGED--> ENGAGING
+                                       PERSON_DETECTED --orienting: NO_FACE/TIMEOUT--> MOVING
     ENGAGING --conversation_ended()--> MOVING   (Natural End)
     ENGAGING --tick(), timed out------> MOVING   (Timeout)
 
@@ -18,11 +19,13 @@ Design choices, and why:
 * **"Person Detected" is a real, momentary state, not folded into the
   MOVING->ENGAGING transition.** Per the handoff doc, entering it means
   stopping the robot and turning the head servo — real physical actions
-  with real duration once actuators exist. `_orient_toward_person()` is a
-  stub today, so the state currently passes through in the same call as
-  `person_detected()`, but the structure is already correct: swap the stub
-  for a blocking servo call later and PERSON_DETECTED will naturally take
-  wall-clock time without changing the state machine itself.
+  with real duration once actuators exist. With no engagement_provider
+  configured, `_orient_toward_person()` is still a stub and the state
+  passes through in the same call as `person_detected()`; with one
+  configured, it blocks for the real orientation attempt (turn camera,
+  watch for a face) and PERSON_DETECTED naturally takes wall-clock time,
+  without the state machine itself changing. It's also no longer guaranteed
+  to lead to ENGAGING — see the state diagram above.
 
 * **No separate "Resume" state.** Resuming just means "go back to MOVING" —
   there's no distinct action or duration attached to it beyond that, so
@@ -52,10 +55,32 @@ Design choices, and why:
   requirement (per the project's "technology demonstration platform"
   framing) is that a broken conversation turn must never crash the state
   machine mid-demo.
+
+* **Same decoupling for `_orient_toward_person()`, now that it does
+  something real.** `onvif_camera/engage.py`'s `run_engagement_attempt()`
+  needs a connect()ed, calibrated `PTZCamera`, an RTSP URL, and (via
+  mediapipe) a face-detection model — none of that belongs in a module
+  whose whole point is being testable without hardware. So this file
+  defines only `Direction` (a plain pan/tilt/label value, zero dependency
+  on `onvif_camera`), `EngagementOutcome` (this module's own three-value
+  vocabulary — ENGAGED / NO_FACE / TIMEOUT — deliberately not
+  `engage.Outcome`, so nothing here imports `engage.py`), and
+  `EngagementProvider` (a `Callable[[Direction], EngagementOutcome]`
+  Protocol-style type alias, exactly parallel to `ConversationBrainLike`).
+  `engage.py` itself is never imported here and has no idea this state
+  machine exists. The actual bridge — translating `engage.py`'s real
+  `EngagementResult` into an `EngagementOutcome`, and owning the real
+  `PTZCamera`/RTSP/`FaceDetector` — lives in the separate
+  `engagement_provider.py`, which only the code that wires up real hardware
+  needs to import (same role `demo_state_machine.py` already plays for
+  `ConversationBrain`). With no provider configured, `_orient_toward_person()`
+  falls back to the old stub behavior (always ENGAGED) — so existing tests
+  and the existing demo scenarios are unaffected by this change.
 """
 
 import logging
 import time
+from dataclasses import dataclass
 from enum import Enum
 from typing import Callable, Optional, Protocol
 
@@ -83,6 +108,50 @@ class ConversationBrainLike(Protocol):
     def chat(self, message: str) -> ChatResultLike: ...
 
 
+@dataclass(frozen=True)
+class Direction:
+    """Where to turn to look at the person who tripped detection.
+
+    Eventually supplied by which ultrasonic sensor fired (see the sensor
+    pin table in docs/D3BOUUR_Project_Handoff.md §13) — simulated by
+    test/demo code for now, same as `person_detected()` itself being
+    simulated by a direct call rather than a real perception signal.
+
+    `pan`/`tilt` are plain floats in PTZCamera's own 0.0-1.0 dead-reckoning
+    fraction space (see onvif_camera/ptz.py) — kept here as bare floats,
+    not a PTZCamera type, so this module still has zero dependency on
+    onvif_camera/cv2/mediapipe. `label` is optional and only for logging
+    (e.g. "front", "left" — which sensor this came from).
+    """
+
+    pan: float
+    tilt: float
+    label: str = ""
+
+    def __str__(self) -> str:
+        return f"{self.label or 'unlabeled'}(pan={self.pan:.2f}, tilt={self.tilt:.2f})"
+
+
+class EngagementOutcome(Enum):
+    """This module's own vocabulary for how an orientation attempt ended —
+    deliberately distinct from engage.py's `Outcome` enum (ENGAGED /
+    RETURN_NO_FACE / RETURN_TIMEOUT) so nothing here needs to import
+    engage.py to know its type. See engagement_provider.py for the
+    translation between the two."""
+
+    ENGAGED = "engaged"
+    NO_FACE = "no_face"
+    TIMEOUT = "timeout"
+
+
+# A callable taking the Direction to look in and returning how it went.
+# Exactly parallel to ConversationBrainLike: the state machine only needs
+# something matching this shape, never a concrete engage.py import. Pass a
+# real EngagementProvider (engagement_provider.RealEngagementProvider) for
+# actual hardware, or a trivial fake for tests — same pattern as
+# `conversation_brain`.
+EngagementProvider = Callable[[Optional[Direction]], EngagementOutcome]
+
 OnStateChange = Callable[[State, State, str], None]
 
 
@@ -97,11 +166,18 @@ class BehaviorStateMachine:
     def __init__(
         self,
         conversation_brain: ConversationBrainLike,
+        engagement_provider: Optional[EngagementProvider] = None,
         timeout_seconds: float = 8.0,
         clock: Callable[[], float] = time.monotonic,
         on_state_change: Optional[OnStateChange] = None,
     ) -> None:
         self._brain = conversation_brain
+        # Optional by design, like knowledge_base was for ConversationBrain:
+        # without one, _orient_toward_person() falls back to the old stub
+        # (always ENGAGED) — existing tests/demos that don't pass one keep
+        # their exact prior behavior. With one, PERSON_DETECTED really can
+        # end without a conversation (RETURN_NO_FACE / RETURN_TIMEOUT).
+        self._engagement_provider = engagement_provider
         self._timeout_seconds = timeout_seconds
         self._clock = clock
         self._on_state_change = on_state_change
@@ -112,22 +188,54 @@ class BehaviorStateMachine:
     def state(self) -> State:
         return self._state
 
-    def person_detected(self) -> None:
+    def person_detected(self, direction: Optional[Direction] = None) -> None:
         """Fire when a person is detected while MOVING. No-op otherwise —
-        already dealing with someone."""
+        already dealing with someone.
+
+        `direction` is where to look (see Direction) — simulated by the
+        caller for now, same as this event itself being simulated. Only
+        transitions on to ENGAGING if orienting actually finds someone who
+        wants to talk (EngagementOutcome.ENGAGED); otherwise it resumes
+        MOVING directly, without ever starting a conversation."""
         if self._state is not State.MOVING:
             logger.info("person_detected ignored — already in %s", self._state.value)
             return
 
         self._transition(State.PERSON_DETECTED, "person detected")
-        self._orient_toward_person()
-        self._transition(State.ENGAGING, "oriented toward person, starting conversation")
-        self._last_activity = self._clock()
+        outcome = self._orient_toward_person(direction)
 
-    def _orient_toward_person(self) -> None:
-        """Stub: stop movement, turn head servo toward the person. No real
-        actuators wired up yet (see docs/D3BOUUR_Project_Handoff.md §6)."""
-        logger.info("[stub] stopping movement + turning head servo toward person")
+        if outcome is EngagementOutcome.ENGAGED:
+            self._transition(State.ENGAGING, "oriented toward person, starting conversation")
+            self._last_activity = self._clock()
+        else:
+            self._transition(State.MOVING, f"resume (orientation: {outcome.value})")
+
+    def _orient_toward_person(self, direction: Optional[Direction]) -> EngagementOutcome:
+        """Stop movement, turn head servo/camera toward the person, and
+        decide whether they actually want to engage. Delegates to
+        `self._engagement_provider` if one is configured (see
+        engagement_provider.RealEngagementProvider for the real hardware
+        path); falls back to the old always-ENGAGED stub otherwise. A
+        provider failure (camera/detector trouble) is treated as NO_FACE
+        rather than crashing the state machine — same "must not crash
+        mid-demo" reasoning as visitor_said()'s broad except."""
+        if self._engagement_provider is None:
+            logger.info(
+                "[stub] no engagement_provider configured — stopping movement + "
+                "turning head servo toward person (direction=%s)",
+                direction,
+            )
+            return EngagementOutcome.ENGAGED
+
+        logger.info("Orienting toward person (direction=%s) via engagement_provider", direction)
+        try:
+            outcome = self._engagement_provider(direction)
+        except Exception:
+            logger.exception("engagement_provider failed — treating as NO_FACE, staying safe")
+            return EngagementOutcome.NO_FACE
+
+        logger.info("Engagement attempt outcome: %s", outcome.value)
+        return outcome
 
     def visitor_said(self, text: str) -> Optional[ChatResultLike]:
         """Feed one turn of visitor speech (today: typed by a test script;
